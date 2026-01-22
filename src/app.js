@@ -256,7 +256,7 @@ const complaintReportRouter = InitComplaintReportRouter(complaintReportUsecase);
 const userTaskRouter = require('./routes/userTasks').InitUserTaskRouter(userTaskUsecase);
 const { InitDashboardRouter } = require('./routes/dashboard');
 const dashboardRouter = InitDashboardRouter(dashboardUsecase);
-const internalRouter = InitInternalRouter({ tenantRepository, tenantPaymentLogRepository });
+const internalRouter = InitInternalRouter({ tenantRepository, tenantPaymentLogRepository, userTaskEvidenceRepository });
 const settingsRouter = InitSettingsRouter(settingsUsecase);
 
 // Middleware

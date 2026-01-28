@@ -40,6 +40,10 @@ Unit.init(
       type: DataTypes.FLOAT,
       allowNull: false,
     },
+    building_area: {
+      type: DataTypes.FLOAT,
+      allowNull: true,
+    },
     electrical_power: DataTypes.INTEGER,
     electrical_unit: {
       type: DataTypes.STRING,

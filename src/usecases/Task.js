@@ -1,4 +1,5 @@
 const sequelize = require("../models/sequelize");
+const { TaskType, TaskTypeStrToInt, TaskStatus, TaskStatusStrToInt } = require("../models/Task");
 
 class TaskUsecase {
   constructor(taskRepository, taskScheduleRepository, taskLogRepository, taskParentRepository) {
@@ -12,7 +13,15 @@ class TaskUsecase {
     try {
       ctx.log?.info(data, "TaskUsecase.createTask");
       const result = await sequelize.transaction(async (t) => {
-        console.log("im here1", ctx)
+        const taskTypeInt = data.task_type !== undefined
+          ? (typeof data.task_type === 'string' ? TaskTypeStrToInt[data.task_type] : data.task_type)
+          : TaskType.REPEAT;
+        const statusInt = data.status !== undefined
+          ? (typeof data.status === 'string' ? TaskStatusStrToInt[data.status] : data.status)
+          : TaskStatus.ACTIVE;
+        const isRepeat = taskTypeInt === TaskType.REPEAT;
+        const area = isRepeat ? null : (data.area != null && data.area !== '' ? data.area : 'all area');
+
         let createData = {
           name: data.name,
           is_main_task: data.is_main_task,
@@ -24,6 +33,9 @@ class TaskUsecase {
           role_id: data.role_id,
           is_all_times: data.is_all_times,
           task_group_id: data.task_group_id || null,
+          task_type: taskTypeInt,
+          status: statusInt,
+          area,
           created_by: ctx.userId,
         };
         const task = await this.taskRepository.create(t, createData, ctx);
@@ -127,6 +139,15 @@ class TaskUsecase {
         if (data.role_id !== undefined) updateData.role_id = data.role_id;
         if (data.is_all_times !== undefined) updateData.is_all_times = data.is_all_times;
         if (data.task_group_id !== undefined) updateData.task_group_id = data.task_group_id;
+        if (data.task_type !== undefined) {
+          updateData.task_type = typeof data.task_type === 'string' ? TaskTypeStrToInt[data.task_type] : data.task_type;
+          updateData.area = updateData.task_type === TaskType.REPEAT ? null : (data.area !== undefined ? data.area : (existingTask.area ?? 'all area'));
+        }
+        if (data.status !== undefined) updateData.status = typeof data.status === 'string' ? TaskStatusStrToInt[data.status] : data.status;
+        if (data.area !== undefined) {
+          const taskType = updateData.task_type !== undefined ? updateData.task_type : existingTask.task_type;
+          updateData.area = taskType === TaskType.REPEAT ? null : data.area;
+        }
         updateData.updated_by = ctx.userId;
         updateData.updated_at = new Date(); // Update the updated_at timestamp
 

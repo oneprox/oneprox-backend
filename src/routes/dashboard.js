@@ -1,4 +1,5 @@
 const { Router } = require('express');
+const { query, validationResult } = require('express-validator');
 const { authMiddleware, ensureRole } = require('../middleware/auth');
 const { createResponse } = require('../services/response');
 
@@ -88,6 +89,42 @@ function InitDashboardRouter(dashboardUsecase) {
       req.log?.error(
         { error: error.message, stack: error.stack },
         'DashboardRouter.getRevenueGrowth_error'
+      );
+      return res.status(500).json(
+        createResponse(null, 'Internal server error', 500)
+      );
+    }
+  });
+
+  const getNonRepeatUserTasksQuery = [
+    query('limit').optional().isInt({ min: 1, max: 500 }).withMessage('limit must be 1-500'),
+    query('offset').optional().isInt({ min: 0 }).withMessage('offset must be non-negative'),
+  ];
+  router.get('/non-repeat-user-tasks', getNonRepeatUserTasksQuery, async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json(createResponse(null, 'Validation error', 400, false, {}, errors.array()));
+      }
+      req.log?.info({ query: req.query }, 'DashboardRouter.getNonRepeatUserTasks');
+      const filters = {};
+      if (req.query.limit) filters.limit = parseInt(req.query.limit, 10);
+      if (req.query.offset) filters.offset = parseInt(req.query.offset, 10);
+      const result = await dashboardUsecase.getNonRepeatUserTasks(filters, {
+        userId: req.auth?.userId,
+        log: req.log,
+      });
+      return res.status(200).json(
+        createResponse(result.items, 'Non-repeat user tasks retrieved successfully', 200, true, {
+          total: result.total,
+          limit: result.limit,
+          offset: result.offset,
+        })
+      );
+    } catch (error) {
+      req.log?.error(
+        { error: error.message, stack: error.stack },
+        'DashboardRouter.getNonRepeatUserTasks_error'
       );
       return res.status(500).json(
         createResponse(null, 'Internal server error', 500)

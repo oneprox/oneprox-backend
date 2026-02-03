@@ -3,6 +3,7 @@ const { Op } = require('sequelize');
 const {
   ComplaintReportStatusIntToStr,
 } = require('../models/ComplaintReport');
+const { TaskTypeIntToStr } = require('../models/Task');
 
 class DashboardUsecase {
   constructor(
@@ -720,6 +721,64 @@ class DashboardUsecase {
       ctx.log?.error(
         { error: error.message, stack: error.stack },
         'DashboardUsecase.getRevenueGrowth_error'
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Get user_task list for non-repeat tasks only (dashboard).
+   * Returns items with separated user, asset, and task objects.
+   */
+  async getNonRepeatUserTasks(filters = {}, ctx = {}) {
+    try {
+      ctx.log?.info({ filters }, 'DashboardUsecase.getNonRepeatUserTasks');
+      const { rows, total } = await this.userTaskRepository.findAllForNonRepeatTasks(filters, ctx);
+      const items = rows.map((ut) => {
+        const user = ut.user || {};
+        const task = ut.task || {};
+        const asset = task.asset || {};
+        const taskTypeInt = task.task_type;
+        const taskTypeStr = TaskTypeIntToStr[taskTypeInt] ?? 'non_repeat';
+        const statusStr = ut.status ?? 'pending';
+        const completed = statusStr === 'completed' || ut.status === 2;
+        return {
+          user_task_id: ut.id,
+          user_id: ut.user_id,
+          task_id: ut.task_id,
+          status: statusStr,
+          completed,
+          created_at: ut.created_at,
+          completed_at: ut.completed_at,
+          notes: ut.notes ?? null,
+          user: {
+            id: user.id ?? null,
+            name: user.name ?? null,
+            email: user.email ?? null,
+          },
+          asset: {
+            id: asset.id ?? null,
+            name: asset.name ?? null,
+            code: asset.code ?? null,
+          },
+          task: {
+            id: task.id ?? null,
+            name: task.name ?? null,
+            area: task.area ?? null,
+            task_type: taskTypeStr,
+          },
+        };
+      });
+      return {
+        items,
+        total,
+        limit: filters.limit ?? null,
+        offset: filters.offset ?? null,
+      };
+    } catch (error) {
+      ctx.log?.error(
+        { filters, error: error.message, stack: error.stack },
+        'DashboardUsecase.getNonRepeatUserTasks_error'
       );
       throw error;
     }

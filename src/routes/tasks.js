@@ -68,6 +68,16 @@ function InitTaskRouter(taskUsecase) {
       if (req.query.child_task_id) {
         filters.child_task_id = parseInt(req.query.child_task_id);
       }
+      if (req.query.task_type !== undefined && req.query.task_type !== '') {
+        filters.task_type = typeof req.query.task_type === 'string' && ['non_repeat', 'repeat'].includes(req.query.task_type)
+          ? (req.query.task_type === 'repeat' ? 1 : 0)
+          : parseInt(req.query.task_type, 10);
+      }
+      if (req.query.status !== undefined && req.query.status !== '') {
+        filters.status = typeof req.query.status === 'string' && ['active', 'inactive'].includes(req.query.status)
+          ? (req.query.status === 'active' ? 1 : 0)
+          : parseInt(req.query.status, 10);
+      }
       if (req.query.order) {
         filters.order = req.query.order;
       }
@@ -227,6 +237,9 @@ function InitTaskRouter(taskUsecase) {
     body("parent_task_ids").isArray().optional(),
     body("parent_task_ids.*").isInt().optional(),
     body("task_group_id").isInt().optional(),
+    body("task_type").optional().isIn(['non_repeat', 'repeat', 0, 1]).withMessage("task_type must be non_repeat, repeat, 0, or 1"),
+    body("status").optional().isIn(['active', 'inactive', 0, 1]).withMessage("status must be active, inactive, 0, or 1"),
+    body("area").optional().isString().trim(),
     body("days").isArray().optional(),
     body("times").isArray().optional(),
   ];
@@ -242,9 +255,12 @@ function InitTaskRouter(taskUsecase) {
     body("asset_id").isUUID().optional(),
     body("role_id").isInt().optional(),
     body("is_all_times").isBoolean().optional(),
-    body("parent_task_ids").isArray().optional(), // Array of parent task IDs
-    body("parent_task_ids.*").isInt().optional(), // Validate each element in array
+    body("parent_task_ids").isArray().optional(),
+    body("parent_task_ids.*").isInt().optional(),
     body("task_group_id").isInt().optional(),
+    body("task_type").optional().isIn(['non_repeat', 'repeat', 0, 1]).withMessage("task_type must be non_repeat, repeat, 0, or 1"),
+    body("status").optional().isIn(['active', 'inactive', 0, 1]).withMessage("status must be active, inactive, 0, or 1"),
+    body("area").optional().isString().trim(),
   ];
 
   const getTaskLogsParam = [
@@ -267,6 +283,8 @@ function InitTaskRouter(taskUsecase) {
     query("name").optional().isString().trim(),
     query("parent_task_id").optional().isInt().withMessage("parent_task_id must be an integer"),
     query("child_task_id").optional().isInt().withMessage("child_task_id must be an integer"),
+    query("task_type").optional().isIn(['non_repeat', 'repeat', '0', '1']).withMessage("task_type must be non_repeat, repeat, 0, or 1"),
+    query("status").optional().isIn(['active', 'inactive', '0', '1']).withMessage("status must be active, inactive, 0, or 1"),
     query("order").optional().isIn(['newest', 'oldest', 'a-z', 'z-a']).withMessage("order must be one of: newest, oldest, a-z, z-a"),
     query("limit").optional().isInt({ min: 1, max: 100 }).withMessage("limit must be between 1 and 100"),
     query("offset").optional().isInt({ min: 0 }).withMessage("offset must be a non-negative integer"),

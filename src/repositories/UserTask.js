@@ -1,6 +1,7 @@
 const { Op } = require("sequelize");
 const moment = require("moment-timezone");
 const { UserTaskStatusIntToStr, UserTaskStatusStrToInt } = require("../models/UserTask");
+const { TaskType, TaskStatus } = require("../models/Task");
 
 class UserTaskRepository {
   constructor(userTaskModel, userModel, taskModel, userTaskEvidenceModel, taskScheduleModel, taskGroupModel, taskParentModel) {
@@ -182,6 +183,58 @@ class UserTaskRepository {
       };
     } catch (error) {
       ctx.log?.error({ filters, error: error.message }, 'UserTaskRepository.findAll_error');
+      throw error;
+    }
+  }
+
+  /**
+   * Find all user_tasks for non-repeat tasks only (dashboard).
+   * Returns rows with user, task (with asset), for mapping to dashboard shape.
+   */
+  async findAllForNonRepeatTasks(filters = {}, ctx = {}) {
+    try {
+      ctx.log?.info({ filters }, 'UserTaskRepository.findAllForNonRepeatTasks');
+      const { Asset } = require('../models/Asset');
+      const queryOptions = {
+        where: {},
+        include: [
+          {
+            model: this.userModel,
+            as: 'user',
+            attributes: ['id', 'name', 'email'],
+            required: true,
+          },
+          {
+            model: this.taskModel,
+            as: 'task',
+            attributes: ['id', 'name', 'area', 'task_type', 'asset_id'],
+            where: { task_type: TaskType.NON_REPEAT },
+            required: true,
+            include: [
+              {
+                model: Asset,
+                as: 'asset',
+                attributes: ['id', 'name', 'code'],
+                required: false,
+              },
+            ],
+          },
+        ],
+        order: [['created_at', 'DESC']],
+      };
+      if (filters.limit) queryOptions.limit = parseInt(filters.limit, 10);
+      if (filters.offset) queryOptions.offset = parseInt(filters.offset, 10);
+      const { count, rows } = await this.userTaskModel.findAndCountAll(queryOptions);
+      const rowsJson = rows.map((ut) => {
+        const utJson = ut.toJSON();
+        if (utJson.status !== undefined) {
+          utJson.status = UserTaskStatusIntToStr[utJson.status] || 'pending';
+        }
+        return utJson;
+      });
+      return { rows: rowsJson, total: count };
+    } catch (error) {
+      ctx.log?.error({ filters, error: error.message }, 'UserTaskRepository.findAllForNonRepeatTasks_error');
       throw error;
     }
   }
@@ -611,14 +664,8 @@ class UserTaskRepository {
 
         const matchingTaskGroupIds = matchingTaskGroups.map(tg => tg.toJSON().id);
         
-        // Only generate user tasks for tasks that belong to matching task groups
-        // If no matching task groups found, don't generate any tasks
         if (matchingTaskGroupIds.length === 0) {
-          ctx.log?.info({ currentTime }, 'No matching task groups found for current time');
-          return {
-            created: 0,
-            userTasks: []
-          };
+          ctx.log?.info({ currentTime }, 'No matching task groups found for current time (will still add active non-repeat tasks)');
         }
 
         // Helper function to parse time
@@ -1124,6 +1171,62 @@ class UserTaskRepository {
             }
             
             userTaskDataToCreate.push(mainTaskItem);
+          }
+        }
+
+        // Add user tasks for active non-repeat tasks (one per task per generation; skip if already created today)
+        const nonRepeatMainTasks = await this.taskModel.findAll({
+          where: {
+            task_type: TaskType.NON_REPEAT,
+            status: TaskStatus.ACTIVE,
+            is_main_task: true,
+            role_id: userRoleId,
+          },
+          attributes: ['id', 'name', 'is_main_task', 'task_group_id'],
+          transaction: t,
+        });
+        if (nonRepeatMainTasks.length > 0) {
+          const nonRepeatTaskIds = nonRepeatMainTasks.map((t) => t.id);
+          const startOfToday = now.clone().startOf('day').toDate();
+          const endOfToday = now.clone().endOf('day').toDate();
+          const existingNonRepeatUserTasks = await this.userTaskModel.findAll({
+            where: {
+              user_id: userId,
+              task_id: { [Op.in]: nonRepeatTaskIds },
+              created_at: { [Op.between]: [startOfToday, endOfToday] },
+            },
+            attributes: ['task_id'],
+            transaction: t,
+          });
+          const existingTaskIdsToday = new Set(existingNonRepeatUserTasks.map((ut) => ut.task_id));
+          for (const task of nonRepeatMainTasks) {
+            if (existingTaskIdsToday.has(task.id)) continue;
+            const taskJson = task.toJSON ? task.toJSON() : task;
+            const mainTaskItem = {
+              userTaskData: {
+                task_id: task.id,
+                user_id: userId,
+                start_at: null,
+                completed_at: null,
+                notes: null,
+                status: 'pending',
+                code: generationCode,
+                is_main_task: true,
+                parent_user_task_id: null,
+                time: null,
+              },
+              sortData: {
+                is_main_task: true,
+                scheduleTime: null,
+                taskId: task.id,
+                taskGroupStartTime: null,
+                taskGroupEndTime: null,
+                isChildOfTaskId: null,
+              },
+              childTasks: [],
+            };
+            userTaskDataToCreate.push(mainTaskItem);
+            ctx.log?.info({ taskId: task.id, taskName: taskJson.name }, 'Adding active non-repeat task to user task generation');
           }
         }
 

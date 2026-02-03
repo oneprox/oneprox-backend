@@ -1,6 +1,20 @@
 const { DataTypes, Model } = require('sequelize');
 const sequelize = require('./sequelize');
 
+const TaskType = {
+  NON_REPEAT: 0,
+  REPEAT: 1,
+};
+const TaskTypeStrToInt = { non_repeat: 0, repeat: 1 };
+const TaskTypeIntToStr = { 0: 'non_repeat', 1: 'repeat' };
+
+const TaskStatus = {
+  INACTIVE: 0,
+  ACTIVE: 1,
+};
+const TaskStatusStrToInt = { inactive: 0, active: 1 };
+const TaskStatusIntToStr = { 0: 'inactive', 1: 'active' };
+
 class Task extends Model {}
 
 Task.init({
@@ -45,6 +59,23 @@ Task.init({
   task_group_id: {
     type: DataTypes.BIGINT,
     allowNull: true,
+  },
+  task_type: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: TaskType.REPEAT,
+    comment: '0=non_repeat, 1=repeat',
+  },
+  status: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: TaskStatus.ACTIVE,
+    comment: '0=inactive, 1=active',
+  },
+  area: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: 'Non-repeat default "all area"; repeat empty',
   },
   created_by: {
     type: DataTypes.UUID,
@@ -97,3 +128,9 @@ Task.associate = (models) => {
 }
 
 module.exports = Task;
+module.exports.TaskType = TaskType;
+module.exports.TaskTypeStrToInt = TaskTypeStrToInt;
+module.exports.TaskTypeIntToStr = TaskTypeIntToStr;
+module.exports.TaskStatus = TaskStatus;
+module.exports.TaskStatusStrToInt = TaskStatusStrToInt;
+module.exports.TaskStatusIntToStr = TaskStatusIntToStr;

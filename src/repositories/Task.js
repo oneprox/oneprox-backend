@@ -156,6 +156,12 @@ class TaskRepository {
           [Op.iLike]: `%${filters.name}%`
         };
       }
+      if (filters.task_type !== undefined) {
+        whereClause.task_type = filters.task_type;
+      }
+      if (filters.status !== undefined) {
+        whereClause.status = filters.status;
+      }
 
       // Filter by parent_task_id - find all child tasks that have this parent
       if (filters.parent_task_id) {

@@ -95,6 +95,50 @@ function InitDashboardRouter(dashboardUsecase) {
     }
   });
 
+  router.get('/asset-overview', async (req, res) => {
+    try {
+      req.log?.info({ query: req.query }, 'DashboardRouter.getAssetOverview');
+      const assetOverview = await dashboardUsecase.getAssetOverview(req.query, {
+        userId: req.auth?.userId,
+        log: req.log,
+      });
+
+      return res.status(200).json(
+        createResponse(assetOverview, 'Asset overview retrieved successfully', 200)
+      );
+    } catch (error) {
+      req.log?.error(
+        { error: error.message, stack: error.stack },
+        'DashboardRouter.getAssetOverview_error'
+      );
+      return res.status(500).json(
+        createResponse(null, 'Internal server error', 500)
+      );
+    }
+  });
+
+  router.get('/financial-table', async (req, res) => {
+    try {
+      req.log?.info({ query: req.query }, 'DashboardRouter.getFinancialTable');
+      const financialTable = await dashboardUsecase.getFinancialTable(req.query, {
+        userId: req.auth?.userId,
+        log: req.log,
+      });
+
+      return res.status(200).json(
+        createResponse(financialTable, 'Financial table retrieved successfully', 200)
+      );
+    } catch (error) {
+      req.log?.error(
+        { error: error.message, stack: error.stack },
+        'DashboardRouter.getFinancialTable_error'
+      );
+      return res.status(500).json(
+        createResponse(null, 'Internal server error', 500)
+      );
+    }
+  });
+
   return router;
 }
 

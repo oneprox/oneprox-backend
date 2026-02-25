@@ -20,6 +20,13 @@ class TenantPaymentLogRepository {
         payment_method: data.payment_method,
         status: data.status !== undefined ? data.status : 0, // Default to 0 (unpaid) if not provided
         notes: data.notes || null,
+        billing_type: data.billing_type || null,
+        billing_period: data.billing_period || null,
+        billing_amount: data.billing_amount || null,
+        outstanding: data.outstanding || null,
+        overdue: data.overdue || null,
+        rate: data.rate !== undefined ? data.rate : 0.01,
+        last_charge_date: data.last_charge_date || null,
         created_by: data.created_by || ctx.userId || null,
         updated_by: data.updated_by || ctx.userId || null,
         created_at: now,

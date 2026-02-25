@@ -25,6 +25,24 @@ class SettingsRepository {
     return setting ? setting.toJSON() : null;
   }
 
+  async findByValue(value, ctx = {}) {
+    ctx.log?.debug({ value }, 'repo_find_setting_by_value');
+    const setting = await this.settingsModel.findOne({
+      where: { value },
+      order: [['created_at', 'DESC']],
+    });
+    return setting ? setting.toJSON() : null;
+  }
+
+  async findAllByValue(value, ctx = {}) {
+    ctx.log?.debug({ value }, 'repo_find_all_settings_by_value');
+    const settings = await this.settingsModel.findAll({
+      where: { value },
+      order: [['created_at', 'DESC']],
+    });
+    return settings.map(setting => setting.toJSON());
+  }
+
   async create(settingData, ctx = {}, t = null) {
     ctx.log?.info({ key: settingData.key }, 'repo_create_setting');
     const setting = await this.settingsModel.create({

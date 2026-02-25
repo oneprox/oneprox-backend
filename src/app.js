@@ -38,6 +38,7 @@ const TenantRepository = require('./repositories/Tenant');
 const TenantAttachmentRepository = require('./repositories/TenantAttachment');
 const MapTenantCategoryRepository = require('./repositories/MapTenantCategory');
 const TenantUnitRepository = require('./repositories/TenantUnit');
+const TenantAssetRepository = require('./repositories/TenantAsset');
 const MenuRepository = require('./repositories/Menu');
 const AssetAttachmentRepository = require('./repositories/AssetAttachment');
 const UnitAttachmentRepository = require('./repositories/UnitAttachment');
@@ -61,6 +62,7 @@ const ScanInfoRepository = require('./repositories/ScanInfo');
 const UserTaskRepository = require('./repositories/UserTask');
 const UserTaskEvidenceRepository = require('./repositories/UserTaskEvidence');
 const TenantPaymentLogRepository = require('./repositories/TenantPaymentLog');
+const TenantLegalRepository = require('./repositories/TenantLegal');
 const SettingsRepository = require('./repositories/Settings');
 
 // define usecase module
@@ -79,6 +81,7 @@ const scanInfoUc = require('./usecases/ScanInfo');
 const complaintReportUc = require('./usecases/ComplaintReport');
 const attendanceUc = require('./usecases/Attendance');
 const tenantPaymentLogUc = require('./usecases/TenantPaymentLog');
+const tenantLegalUc = require('./usecases/TenantLegal');
 const settingsUc = require('./usecases/Settings');
 
 // define models database
@@ -93,6 +96,7 @@ const { Tenant } = require('./models/Tenant');
 const {TenantAttachmentModel} = require('./models/TenantAttachment');
 const MapTenantCategory = require('./models/MapTenantCategory');
 const modelTenantUnit = require('./models/TenantUnit');
+const modelTenantAsset = require('./models/TenantAsset');
 const modelMenu = require('./models/Menu');
 const modelRoleMenuPermission = require('./models/RoleMenuPermission');
 const { AssetAttachment } = require('./models/AssetAttachment');
@@ -115,6 +119,7 @@ const modelTaskParent = require('./models/TaskParent');
 const modelUserTask = require('./models/UserTask');
 const modelUserTaskEvidence = require('./models/UserTaskEvidence');
 const { TenantPaymentLog: modelTenantPaymentLog } = require('./models/TenantPaymentLog');
+const TenantLegal = require('./models/TenantLegal');
 const Settings = require('./models/Settings');
 
 // initialize repository
@@ -128,6 +133,7 @@ const tenantRepository = new TenantRepository(Tenant, User, modelTenantCategory)
 const tenantAttachmentRepository = new TenantAttachmentRepository(TenantAttachmentModel)
 const mapTenantCategoryRepository = new MapTenantCategoryRepository(MapTenantCategory)
 const tenantUnitRepository = new TenantUnitRepository(modelTenantUnit)
+const tenantAssetRepository = new TenantAssetRepository(modelTenantAsset)
 const menuRepository = new MenuRepository(modelMenu)
 const assetAttachmentRepository = new AssetAttachmentRepository(AssetAttachment);
 const unitAttachmentRepository = new UnitAttachmentRepository(modelUnitAttachment);
@@ -150,6 +156,7 @@ const scanInfoRepository = new ScanInfoRepository(modelScanInfo, User, Asset);
 const userTaskRepository = new UserTaskRepository(modelUserTask, User, modelTask, modelUserTaskEvidence, modelTaskSchedule, modelTaskGroup, modelTaskParent);
 const userTaskEvidenceRepository = new UserTaskEvidenceRepository(modelUserTaskEvidence, modelUserTask);
 const tenantPaymentLogRepository = new TenantPaymentLogRepository(modelTenantPaymentLog, Tenant, User);
+const tenantLegalRepository = new TenantLegalRepository(TenantLegal, Tenant, User);
 const settingsRepository = new SettingsRepository(Settings);
 
 // Setup model associations
@@ -167,6 +174,7 @@ const models = {
   TenantAttachment: TenantAttachmentModel,
   MapTenantCategory: MapTenantCategory,
   TenantUnit: modelTenantUnit,
+  TenantAsset: modelTenantAsset,
   AssetAttachment: AssetAttachment,
   UnitAttachment: modelUnitAttachment,
   TenantCategory: modelTenantCategory,
@@ -187,6 +195,7 @@ const models = {
   UserTask: modelUserTask,
   UserTaskEvidence: modelUserTaskEvidence,
   TenantPaymentLog: modelTenantPaymentLog,
+  TenantLegal: TenantLegal,
   Settings: Settings,
 };
 
@@ -214,7 +223,7 @@ const authUsecase = new authUc(
 );
 const userUsecase = new userUc(userRepository, userLogRepository, userAssetRepository);
 const unitUsecase = new unitUc(unitRepository, unitAttachmentRepository, unitLogRepository);
-const tenantUsecase = new tenantUc(tenantRepository, tenantAttachmentRepository, tenantUnitRepository, mapTenantCategoryRepository, tenantCategoryRepository, unitRepository, tenantLogRepository, depositoLogRepository, userUsecase, tenantPaymentLogRepository);
+const tenantUsecase = new tenantUc(tenantRepository, tenantAttachmentRepository, tenantUnitRepository, tenantAssetRepository, mapTenantCategoryRepository, tenantCategoryRepository, unitRepository, tenantLogRepository, depositoLogRepository, userUsecase, tenantPaymentLogRepository, tenantLegalRepository, settingsRepository);
 const roleUsecase = new roleUc(roleRepository);
 const menuUsecase = new menuUc(menuRepository);
 const userAccessMenuUsecase = new userAccessMenuUc(userAccessMenuRepository);
@@ -226,6 +235,7 @@ const complaintReportUsecase = new complaintReportUc(complaintReportRepository, 
 const attendanceRepository = new AttendanceRepository();
 const attendanceUsecase = new attendanceUc(attendanceRepository);
 const tenantPaymentLogUsecase = new tenantPaymentLogUc(tenantPaymentLogRepository, tenantRepository);
+const tenantLegalUsecase = new tenantLegalUc(tenantLegalRepository, tenantRepository, settingsRepository);
 const settingsUsecase = new settingsUc(settingsRepository);
 const DashboardUsecase = require('./usecases/Dashboard');
 const dashboardUsecase = new DashboardUsecase(
@@ -244,7 +254,7 @@ const authRouter = auth.InitAuthRouter(authUsecase);
 const assetRouter = asset.InitAssetRouter(assetUsecase);
 const userRouter = user.InitUserRouter(userUsecase, userAccessMenuUsecase);
 const unitRouter = units.InitUnitRouter(unitUsecase);
-const tenantRouter = tenant.InitTenantRouter(tenantUsecase, tenantPaymentLogUsecase);
+const tenantRouter = tenant.InitTenantRouter(tenantUsecase, tenantPaymentLogUsecase, tenantLegalUsecase);
 const roleRouter = InitRoleRouter(roleUsecase);
 const menuRouter = InitMenuRouter(menuUsecase);
 const attendanceRouter = InitAttendanceRouter(attendanceUsecase);

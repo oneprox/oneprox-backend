@@ -27,7 +27,7 @@ TenantPaymentLog.init({
   },
   amount: {
     type: DataTypes.FLOAT,
-    allowNull: false,
+    allowNull: true,
   },
   paid_amount: {
     type: DataTypes.FLOAT,
@@ -51,7 +51,7 @@ TenantPaymentLog.init({
   },
   payment_method: {
     type: DataTypes.ENUM('cash', 'bank_transfer', 'qris', 'other'),
-    allowNull: false,
+    allowNull: true,
   },
   status: {
     type: DataTypes.INTEGER,
@@ -62,6 +62,42 @@ TenantPaymentLog.init({
   notes: {
     type: DataTypes.TEXT,
     allowNull: true,
+  },
+  billing_type: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: 'Jenis tagihan (sewa, listrik, air, service, lainnya)'
+  },
+  billing_period: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: 'Periode tagihan (contoh: Januari 2024)'
+  },
+  billing_amount: {
+    type: DataTypes.FLOAT,
+    allowNull: true,
+    comment: 'Jumlah tagihan'
+  },
+  outstanding: {
+    type: DataTypes.FLOAT,
+    allowNull: true,
+    comment: 'Outstanding amount'
+  },
+  overdue: {
+    type: DataTypes.FLOAT,
+    allowNull: true,
+    comment: 'Overdue amount'
+  },
+  rate: {
+    type: DataTypes.FLOAT,
+    allowNull: true,
+    defaultValue: 0.01,
+    comment: 'Rate (default 0.01)'
+  },
+  last_charge_date: {
+    type: DataTypes.FLOAT,
+    allowNull: true,
+    comment: 'Last charge (nominal)'
   },
   created_by: {
     type: DataTypes.UUID,

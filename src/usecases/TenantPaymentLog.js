@@ -19,18 +19,26 @@ class TenantPaymentLogUsecase {
       }
 
       // Create payment log
-      // payment_date, paid_amount, and payment_deadline can be null initially
+      // billing_period, billing_amount, and payment_deadline are mandatory
+      // payment_date, paid_amount can be null initially
       // If payment_date is provided, status should be "paid" and paid_amount should equal amount
       const hasPaymentDate = data.payment_date != null;
       const paymentLog = await this.tenantPaymentLogRepository.create({
         tenant_id: data.tenant_id,
-        amount: data.amount,
+        amount: data.amount || null,
         paid_amount: hasPaymentDate ? data.amount : null, // Set to amount if payment_date is provided
         payment_date: data.payment_date || null, // Use provided payment_date or null
-        payment_deadline: data.payment_deadline || null, // Payment deadline (optional)
-        payment_method: data.payment_method,
+        payment_deadline: data.payment_deadline, // Payment deadline (mandatory)
+        payment_method: data.payment_method || null,
         status: hasPaymentDate ? 1 : 0, // 1 = paid if payment_date is provided, 0 = unpaid otherwise
-        notes: data.notes,
+        notes: data.notes || null,
+        billing_type: data.billing_type || null,
+        billing_period: data.billing_period, // Mandatory
+        billing_amount: data.billing_amount, // Mandatory
+        outstanding: data.outstanding || null,
+        overdue: data.overdue || null,
+        rate: data.rate !== undefined ? data.rate : 0.01,
+        last_charge_date: data.last_charge_date || null,
         created_by: ctx.userId,
         updated_by: ctx.userId,
       }, ctx);

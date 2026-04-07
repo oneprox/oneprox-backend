@@ -83,6 +83,11 @@ Tenant.init({
     type: DataTypes.BIGINT,
     allowNull: true,
   },
+  sub_category: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: 'Sub kategori tenant'
+  },
   status: {
     type: DataTypes.INTEGER,
     defaultValue: 2, // pending
@@ -93,6 +98,21 @@ Tenant.init({
     allowNull: true,
     defaultValue: 'scheduled',
     comment: 'Payment status: paid, scheduled, reminder_needed, overdue'
+  },
+  building_area: {
+    type: DataTypes.FLOAT,
+    allowNull: true,
+    comment: 'Luas bangunan dalam m²'
+  },
+  land_area: {
+    type: DataTypes.FLOAT,
+    allowNull: true,
+    comment: 'Luas tanah dalam m²'
+  },
+  electricity_power: {
+    type: DataTypes.FLOAT,
+    allowNull: true,
+    comment: 'Daya listrik dalam VA'
   },
   code: {
     type: DataTypes.STRING,

@@ -36,6 +36,7 @@ class UnitUsecase {
         new_data: {
           name: unit.name,
           size: unit.size,
+          building_area: unit.building_area,
         },
         created_by: ctx.userId,
       };
@@ -82,6 +83,7 @@ class UnitUsecase {
       asset_id: data.asset_id ?? unit.asset?.id,
       name: data.name ?? unit.name,
       size: data.size ?? unit.size,
+      building_area: data.building_area ?? unit.building_area,
       electrical_power: data.electrical_power ?? unit.electrical_power,
       electrical_unit: data.electrical_unit ?? unit.electrical_unit,
       is_toilet_exist: data.is_toilet_exist ?? unit.is_toilet_exist,
@@ -119,6 +121,10 @@ class UnitUsecase {
       if (data.size !== undefined && data.size !== unit.size) {
         oldData.size = unit.size;
         newData.size = data.size;
+      }
+      if (data.building_area !== undefined && data.building_area !== unit.building_area) {
+        oldData.building_area = unit.building_area;
+        newData.building_area = data.building_area;
       }
       if (data.description !== undefined && data.description !== unit.description) {
         oldData.description = unit.description;

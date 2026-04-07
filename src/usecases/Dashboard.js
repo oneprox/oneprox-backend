@@ -13,7 +13,9 @@ class DashboardUsecase {
     attendanceRepository,
     tenantUnitRepository,
     unitRepository,
-    assetRepository
+    assetRepository,
+    tenantPaymentLogRepository,
+    tenantLegalRepository
   ) {
     this.complaintReportRepository = complaintReportRepository;
     this.tenantRepository = tenantRepository;
@@ -23,6 +25,8 @@ class DashboardUsecase {
     this.tenantUnitRepository = tenantUnitRepository;
     this.unitRepository = unitRepository;
     this.assetRepository = assetRepository;
+    this.tenantPaymentLogRepository = tenantPaymentLogRepository;
+    this.tenantLegalRepository = tenantLegalRepository;
   }
 
   async getDashboardStats(ctx) {
@@ -720,6 +724,519 @@ class DashboardUsecase {
       ctx.log?.error(
         { error: error.message, stack: error.stack },
         'DashboardUsecase.getRevenueGrowth_error'
+      );
+      throw error;
+    }
+  }
+
+  async getAssetOverview(queryParams, ctx) {
+    try {
+      ctx.log?.info({ queryParams }, 'DashboardUsecase.getAssetOverview');
+      
+      const { assetId } = queryParams || {};
+      
+      // Load all assets
+      const allAssetsResponse = await this.assetRepository.listAll({ limit: 1000 }, ctx);
+      const allAssets = allAssetsResponse?.assets || allAssetsResponse?.data || [];
+      
+      // Filter by selected asset
+      let filteredAssets = allAssets;
+      if (assetId && assetId !== 'all') {
+        filteredAssets = allAssets.filter(a => {
+          const assetData = a.toJSON ? a.toJSON() : a;
+          return assetData.id === assetId;
+        });
+      }
+      
+      // Load all tenants
+      const allTenantsResponse = await this.tenantRepository.findAll({ limit: 10000 }, ctx);
+      const allTenants = allTenantsResponse?.tenants || allTenantsResponse?.data || [];
+      
+      // Filter hanya tenant yang aktif
+      const activeTenantsRaw = allTenants.filter(t => {
+        const tenantData = t.toJSON ? t.toJSON() : t;
+        return tenantData.status === 1 || tenantData.status === 'active';
+      });
+      
+      // Load units for each active tenant
+      const activeTenantIds = activeTenantsRaw.map(t => {
+        const tenantData = t.toJSON ? t.toJSON() : t;
+        return tenantData.id;
+      });
+      
+      const allTenantUnits = await Promise.all(
+        activeTenantIds.map(id => this.tenantUnitRepository.getByTenantID(id))
+      );
+      
+      // Get all unit IDs from tenant units
+      const unitIds = [];
+      allTenantUnits.forEach(tenantUnits => {
+        if (tenantUnits && tenantUnits.length > 0) {
+          tenantUnits.forEach(tu => {
+            const unitId = tu.unit_id || tu.get?.('unit_id') || tu.toJSON?.()?.unit_id;
+            if (unitId && !unitIds.includes(unitId)) {
+              unitIds.push(unitId);
+            }
+          });
+        }
+      });
+      
+      // Get all units in batch
+      const allUnits = await Promise.all(
+        unitIds.map(id => this.unitRepository.findById(id))
+      );
+      
+      // Create unit map for quick lookup
+      const unitMap = new Map();
+      allUnits.forEach(unit => {
+        if (unit && unit.id) {
+          unitMap.set(unit.id, unit);
+        }
+      });
+      
+      // Attach units to each active tenant
+      const activeTenants = activeTenantsRaw.map((tenant, index) => {
+        const tenantData = tenant.toJSON ? tenant.toJSON() : tenant;
+        const tenantUnits = allTenantUnits[index] || [];
+        console.log('Tenant Units:', tenantUnits)
+        const units = tenantUnits
+          .map(tu => {
+            const unitId = tu.unit_id || tu.get?.('unit_id') || tu.toJSON?.()?.unit_id;
+            return unitMap.get(unitId);
+          })
+          .filter(u => u !== undefined);
+        tenantData.units = units;
+        return tenantData;
+      });
+      
+      // Calculate overview data dari tenant aktif
+      let totalLandArea = 0;
+      let totalBuildingArea = 0;
+      let occupiedUnits = 0;
+      let totalUnits = 0;
+      let totalRevenue = 0;
+      
+      filteredAssets.forEach(asset => {
+        const assetData = asset.toJSON ? asset.toJSON() : asset;
+        
+        // Get units for this asset
+        const assetUnits = allUnits.filter(u => {
+          const unitData = u.toJSON ? u.toJSON() : u;
+          return unitData.asset_id === assetData.id || unitData.asset?.id === assetData.id;
+        });
+        totalUnits += assetUnits.length;
+        
+        // Get active tenants for this asset (through units)
+        const assetUnitIds = assetUnits.map(u => {
+          const unitData = u.toJSON ? u.toJSON() : u;
+          return unitData.id;
+        });
+
+        const assetTenants = activeTenants.filter(t => {
+          if (!t.units || !Array.isArray(t.units)) return false;
+          return t.units.some((tu) => {
+            const unitId = tu.id;
+            const unitAssetId = tu.asset?.id || tu.asset_id;
+            return assetUnitIds.includes(unitId) || unitAssetId === assetData.id;
+          });
+        });
+        
+        occupiedUnits += assetTenants.length;
+        
+        // Calculate land area dan building area dari tenant aktif
+        assetTenants.forEach(tenant => {
+          const tenantLandArea = parseFloat(tenant.land_area) || 0;
+          const tenantBuildingArea = parseFloat(tenant.building_area) || 0;
+          totalLandArea += tenantLandArea;
+          totalBuildingArea += tenantBuildingArea;
+        });
+        
+        // Calculate revenue
+        assetTenants.forEach(tenant => {
+          const rentPrice = parseFloat(tenant.rent_price) || 0;
+          totalRevenue += rentPrice;
+        });
+      });
+      
+      const occupancy = totalUnits > 0 ? (occupiedUnits / totalUnits) * 100 : 0;
+      const averageRate = totalBuildingArea > 0 ? totalRevenue / totalBuildingArea : 0;
+      
+      // Calculate utilization data berdasarkan jumlah tenant per kategori
+      const utilizationMap = new Map();
+      const allFilteredTenants = filteredAssets.flatMap(asset => {
+        const assetData = asset.toJSON ? asset.toJSON() : asset;
+        const assetUnits = allUnits.filter(u => {
+          return u.asset_id === assetData.id || u.asset?.id === assetData.id;
+        });
+        const assetUnitIds = assetUnits.map(u => u.id);
+        return activeTenants.filter(t => {
+          if (!t.units || !Array.isArray(t.units)) return false;
+          return t.units.some((tu) => {
+            const unitId = tu.id;
+            const unitAssetId = tu.asset?.id || tu.asset_id;
+            return assetUnitIds.includes(unitId) || unitAssetId === assetData.id;
+          });
+        });
+      });
+      
+      // Group by category and count jumlah tenant
+      allFilteredTenants.forEach(tenant => {
+        const categoryName = tenant.category?.name || 'Lainnya';
+        const currentCount = utilizationMap.get(categoryName) || 0;
+        utilizationMap.set(categoryName, currentCount + 1);
+      });
+      
+      // Convert to array format
+      const utilizationArray = Array.from(utilizationMap.entries())
+        .map(([category, value]) => ({ category, value }))
+        .sort((a, b) => b.value - a.value);
+      
+      // Calculate financial performance data per triwulan (Q1, Q2, Q3, Q4)
+      const currentYear = new Date().getFullYear();
+      const quarters = ['Q1', 'Q2', 'Q3', 'Q4'];
+      const financialMap = new Map();
+      
+      // Initialize semua triwulan
+      quarters.forEach(quarter => {
+        financialMap.set(quarter, { realisasi: 0, target: 0 });
+      });
+      
+      // Helper function to get quarter from month
+      const getQuarter = (month) => {
+        if (month >= 1 && month <= 3) return 'Q1';
+        if (month >= 4 && month <= 6) return 'Q2';
+        if (month >= 7 && month <= 9) return 'Q3';
+        if (month >= 10 && month <= 12) return 'Q4';
+        return 'Q1';
+      };
+      
+      // Get ALL payment logs for all filtered tenants
+      const allTenantIds = allFilteredTenants.map(t => t.id);
+      
+      const allPayments = [];
+      for (const tenantId of allTenantIds) {
+        try {
+          const payments = await this.tenantPaymentLogRepository.findByTenantId(tenantId, { limit: 1000 }, ctx);
+          if (Array.isArray(payments)) {
+            allPayments.push(...payments);
+          } else if (payments?.rows) {
+            allPayments.push(...payments.rows);
+          } else if (payments?.data) {
+            allPayments.push(...payments.data);
+          }
+        } catch (err) {
+          ctx.log?.warn({ tenantId, error: err.message }, 'Error loading payments for tenant');
+        }
+      }
+      
+      // Process all payments untuk menghitung target dan realisasi
+      allPayments.forEach((payment) => {
+        const paymentData = payment.toJSON ? payment.toJSON() : payment;
+        
+        // Hitung TARGET dari billing_amount berdasarkan payment_deadline
+        if (paymentData.payment_deadline && paymentData.billing_amount) {
+          const deadlineDate = new Date(paymentData.payment_deadline);
+          const deadlineYear = deadlineDate.getFullYear();
+          
+          if (deadlineYear === currentYear) {
+            const month = deadlineDate.getMonth() + 1;
+            const quarter = getQuarter(month);
+            const billingAmount = parseFloat(paymentData.billing_amount) || 0;
+            const current = financialMap.get(quarter) || { realisasi: 0, target: 0 };
+            current.target += billingAmount;
+            financialMap.set(quarter, current);
+          }
+        }
+        
+        // Hitung REALISASI dari paid_amount berdasarkan payment_date (hanya yang sudah dibayar)
+        if (paymentData.payment_date && paymentData.paid_amount && paymentData.status === 1) {
+          const paymentDate = new Date(paymentData.payment_date);
+          const paymentYear = paymentDate.getFullYear();
+          
+          if (paymentYear === currentYear) {
+            const month = paymentDate.getMonth() + 1;
+            const quarter = getQuarter(month);
+            const paidAmount = parseFloat(paymentData.paid_amount) || 0;
+            const current = financialMap.get(quarter) || { realisasi: 0, target: 0 };
+            current.realisasi += paidAmount;
+            financialMap.set(quarter, current);
+          }
+        }
+      });
+      
+      // Convert to array format
+      const financialArray = quarters.map(quarter => {
+        const data = financialMap.get(quarter) || { realisasi: 0, target: 0 };
+        return { quarter, realisasi: data.realisasi, target: data.target };
+      });
+      
+      // Load legal data
+      const legalTableData = [];
+      const now = new Date();
+      const currentMonth = now.getMonth();
+      const currentYearForLegal = now.getFullYear();
+      
+      // Get legal documents for each tenant
+      for (const tenant of allTenants) {
+        try {
+          const tenantData = tenant.toJSON ? tenant.toJSON() : tenant;
+          // Get tenant units for this tenant
+          const tenantUnits = await this.tenantUnitRepository.getByTenantID(tenantData.id);
+          const tenantUnitIds = tenantUnits.map(tu => tu.unit_id || tu.get?.('unit_id') || tu.toJSON?.()?.unit_id);
+          const tenantUnitsWithDetails = await Promise.all(
+            tenantUnitIds.map(id => this.unitRepository.findById(id))
+          );
+          tenantData.units = tenantUnitsWithDetails.filter(u => u !== null);
+          
+          const legals = await this.tenantLegalRepository.findByTenantId(tenantData.id, ctx);
+          const legalArray = Array.isArray(legals) ? legals : [];
+          
+          const tenantUnitsForLegal = tenantData.units && Array.isArray(tenantData.units) ? tenantData.units : [];
+          
+          legalArray.forEach((legal) => {
+            const legalData = legal.toJSON ? legal.toJSON() : legal;
+            if (!legalData.due_date || legalData.status === 'selesai') return;
+            
+            const dueDate = new Date(legalData.due_date);
+            const dueMonth = dueDate.getMonth();
+            const dueYear = dueDate.getFullYear();
+            
+            if (dueYear < currentYearForLegal || (dueYear === currentYearForLegal && dueMonth < currentMonth)) {
+              return;
+            }
+            
+            const tenantUnit = tenantUnitsForLegal[0];
+            const asset = tenantUnit?.asset || (tenantUnit?.asset_id ? filteredAssets.find(a => {
+              const assetData = a.toJSON ? a.toJSON() : a;
+              return assetData.id === tenantUnit.asset_id;
+            }) : null);
+            
+            if (!asset) return;
+            
+            const assetData = asset.toJSON ? asset.toJSON() : asset;
+            if (assetId && assetId !== 'all' && assetData.id !== assetId) return;
+            
+            legalTableData.push({
+              id: legalData.id,
+              nama: tenantData.name || '-',
+              aset: assetData.name || '-',
+              unit: tenantUnit?.name || '-',
+              jatuhTempo: dueDate.toLocaleDateString('id-ID', {
+                day: 'numeric',
+                month: 'long',
+                year: 'numeric'
+              }),
+              kewajibanMitra: legalData.description || legalData.doc_type || '-',
+              progress: 10,
+              dokumen: legalData.keterangan || legalData.doc_type || '-',
+              status: 'On Process',
+              tipe: 'legal'
+            });
+          });
+        } catch (err) {
+          ctx.log?.warn({ tenantId: tenant.id, error: err.message }, 'Error loading legal for tenant');
+        }
+      }
+      
+      // Get payment logs (penagihan) yang belum dibayar
+      for (const tenant of allTenants) {
+        try {
+          const tenantData = tenant.toJSON ? tenant.toJSON() : tenant;
+          // Ensure tenant has units loaded
+          if (!tenantData.units) {
+            const tenantUnits = await this.tenantUnitRepository.getByTenantID(tenantData.id);
+            const tenantUnitIds = tenantUnits.map(tu => tu.unit_id || tu.get?.('unit_id') || tu.toJSON?.()?.unit_id);
+            const tenantUnitsWithDetails = await Promise.all(
+              tenantUnitIds.map(id => this.unitRepository.findById(id))
+            );
+            tenantData.units = tenantUnitsWithDetails.filter(u => u !== null);
+          }
+          
+          const payments = await this.tenantPaymentLogRepository.findByTenantId(tenantData.id, { limit: 1000, status: 0 }, ctx);
+          const paymentArray = Array.isArray(payments) ? payments : (payments?.rows || payments?.data || []);
+          
+          const tenantUnits = tenantData.units && Array.isArray(tenantData.units) ? tenantData.units : [];
+          
+          paymentArray.forEach((payment) => {
+            const paymentData = payment.toJSON ? payment.toJSON() : payment;
+            if (!paymentData.payment_deadline || paymentData.status !== 0) return;
+            
+            const deadlineDate = new Date(paymentData.payment_deadline);
+            const deadlineMonth = deadlineDate.getMonth();
+            const deadlineYear = deadlineDate.getFullYear();
+            
+            if (deadlineYear < currentYearForLegal || (deadlineYear === currentYearForLegal && deadlineMonth < currentMonth)) {
+              return;
+            }
+            
+            const tenantUnit = tenantUnitsForLegal[0];
+            const asset = tenantUnit?.asset || (tenantUnit?.asset_id ? filteredAssets.find(a => {
+              const assetData = a.toJSON ? a.toJSON() : a;
+              return assetData.id === tenantUnit.asset_id;
+            }) : null);
+            
+            if (!asset) return;
+            
+            const assetData = asset.toJSON ? asset.toJSON() : asset;
+            if (assetId && assetId !== 'all' && assetData.id !== assetId) return;
+            
+            legalTableData.push({
+              id: paymentData.id,
+              nama: tenantData.name || '-',
+              aset: assetData.name || '-',
+              unit: tenantUnit?.name || '-',
+              jatuhTempo: deadlineDate.toLocaleDateString('id-ID', {
+                day: 'numeric',
+                month: 'long',
+                year: 'numeric'
+              }),
+              kewajibanMitra: paymentData.billing_type || 'Pembayaran Sewa',
+              progress: 0,
+              dokumen: paymentData.billing_period || '-',
+              status: 'Belum Dibayar',
+              tipe: 'payment'
+            });
+          });
+        } catch (err) {
+          ctx.log?.warn({ tenantId: tenant.id, error: err.message }, 'Error loading payments for tenant');
+        }
+      }
+      
+      return {
+        overview: {
+          totalLandArea,
+          totalBuildingArea,
+          occupancy,
+          averageRate
+        },
+        utilization: utilizationArray,
+        financial: financialArray,
+        legal: legalTableData
+      };
+    } catch (error) {
+      ctx.log?.error(
+        { error: error.message, stack: error.stack },
+        'DashboardUsecase.getAssetOverview_error'
+      );
+      throw error;
+    }
+  }
+
+  async getFinancialTable(queryParams, ctx) {
+    try {
+      ctx.log?.info({ queryParams }, 'DashboardUsecase.getFinancialTable');
+      
+      const { assetId } = queryParams || {};
+      
+      // Load all tenants
+      const allTenantsResponse = await this.tenantRepository.findAll({ limit: 10000 }, ctx);
+      const allTenants = allTenantsResponse?.tenants || allTenantsResponse?.data || [];
+      
+      // Load all assets for fallback
+      const allAssetsResponse = await this.assetRepository.listAll({ limit: 1000 }, ctx);
+      const allAssets = allAssetsResponse?.assets || allAssetsResponse?.data || [];
+      
+      const financialTableData = [];
+      const now = new Date();
+      
+      // Get payment logs for each tenant
+      for (const tenant of allTenants) {
+        try {
+          const tenantData = tenant.toJSON ? tenant.toJSON() : tenant;
+          
+          // Get tenant units
+          const tenantUnits = await this.tenantUnitRepository.getByTenantID(tenantData.id);
+          const tenantUnitIds = tenantUnits.map(tu => tu.unit_id || tu.get?.('unit_id') || tu.toJSON?.()?.unit_id);
+          const tenantUnitsWithDetails = await Promise.all(
+            tenantUnitIds.map(id => this.unitRepository.findById(id))
+          );
+          tenantData.units = tenantUnitsWithDetails.filter(u => u !== null);
+          
+          const payments = await this.tenantPaymentLogRepository.findByTenantId(tenantData.id, { limit: 1000 }, ctx);
+          const paymentArray = Array.isArray(payments) ? payments : (payments?.rows || payments?.data || []);
+          
+          paymentArray.forEach((payment) => {
+            const paymentData = payment.toJSON ? payment.toJSON() : payment;
+            
+            // Get asset from unit
+            const tenantUnit = tenantData.units && tenantData.units.length > 0 ? tenantData.units[0] : null;
+            const asset = tenantUnit?.asset || (tenantUnit?.asset_id ? allAssets.find(a => {
+              const assetData = a.toJSON ? a.toJSON() : a;
+              return assetData.id === tenantUnit.asset_id;
+            }) : null);
+            
+            // Skip if no asset found
+            if (!asset) return;
+            
+            const assetData = asset.toJSON ? asset.toJSON() : asset;
+            
+            // Filter by selected asset
+            if (assetId && assetId !== 'all' && assetData.id !== assetId) {
+              return;
+            }
+            
+            // Only show unpaid payments (status 0 = unpaid, 2 = expired)
+            if (paymentData.status === 0 || paymentData.status === 2) {
+              const deadline = paymentData.payment_deadline ? new Date(paymentData.payment_deadline) : null;
+              const aging = deadline ? Math.floor((now.getTime() - deadline.getTime()) / (1000 * 60 * 60 * 24)) : 0;
+              
+              // Determine status based on deadline
+              let status = 'On Process';
+              
+              if (deadline) {
+                const daysUntilDeadline = Math.floor((deadline.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+                
+                if (daysUntilDeadline < 0) {
+                  status = 'Overdue';
+                } else if (daysUntilDeadline <= 30) {
+                  status = 'On Process';
+                }
+              }
+              
+              // Deskripsi: billing_type || billing_period || 'Tagihan Sewa'
+              const deskripsi = paymentData.billing_type || paymentData.billing_period || 'Tagihan Sewa';
+              
+              financialTableData.push({
+                id: paymentData.id,
+                nama: tenantData.name || '-',
+                aset: assetData.name || '-',
+                unit: tenantUnit?.name || '-',
+                jatuhTempo: deadline ? deadline.toLocaleDateString('id-ID', {
+                  day: 'numeric',
+                  month: 'long',
+                  year: 'numeric'
+                }) : '-',
+                deskripsi: deskripsi,
+                nomorInvoice: `INV-${paymentData.id}`,
+                nilaiInvoice: parseFloat(paymentData.amount) || parseFloat(paymentData.billing_amount) || 0,
+                tanggalInvoice: paymentData.created_at ? new Date(paymentData.created_at).toLocaleDateString('id-ID') : '-',
+                status: status,
+                aging: aging > 0 ? aging : 0,
+                deadlineTimestamp: deadline ? deadline.getTime() : null // Untuk sorting
+              });
+            }
+          });
+        } catch (err) {
+          ctx.log?.warn({ tenantId: tenant.id, error: err.message }, 'Error loading payments for tenant');
+        }
+      }
+      
+      // Sort by deadline date (tanggal kecil dulu / ascending)
+      financialTableData.sort((a, b) => {
+        // Jika tidak ada deadline, taruh di akhir
+        if (!a.deadlineTimestamp && !b.deadlineTimestamp) return 0;
+        if (!a.deadlineTimestamp) return 1;
+        if (!b.deadlineTimestamp) return -1;
+        
+        // Urutkan berdasarkan tanggal jatuh tempo dari yang terkecil
+        return a.deadlineTimestamp - b.deadlineTimestamp;
+      });
+      
+      return financialTableData;
+    } catch (error) {
+      ctx.log?.error(
+        { error: error.message, stack: error.stack },
+        'DashboardUsecase.getFinancialTable_error'
       );
       throw error;
     }

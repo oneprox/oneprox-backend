@@ -1,4 +1,81 @@
+const { randomUUID } = require("crypto");
 const sequelize = require("../models/sequelize");
+
+/**
+ * Non-routine task detail: `non_routine_items` must list every frequency slot (length === monthly_frequency).
+ * Mutates plain task payload in place.
+ * @param {Record<string, unknown>} taskPayload
+ */
+function normalizeNonRoutineDetailResponse(taskPayload) {
+  if (taskPayload.is_routine !== false) {
+    return;
+  }
+
+  const freq = Math.min(5, Math.max(1, Number(taskPayload.monthly_frequency) || 1));
+  taskPayload.monthly_frequency = freq;
+
+  let items = taskPayload.non_routine_items;
+  if (typeof items === "string") {
+    try {
+      items = JSON.parse(items);
+    } catch {
+      items = [];
+    }
+  }
+  if (!Array.isArray(items)) {
+    items = [];
+  }
+
+  const mapRow = (it) => {
+    if (!it || typeof it !== "object") {
+      return { due_date: null, area: null, assigned_user_id: null };
+    }
+    let due_date = null;
+    if (it.due_date != null && it.due_date !== "") {
+      const n = Number(it.due_date);
+      if (Number.isInteger(n) && n >= 1 && n <= 28) {
+        due_date = n;
+      }
+    }
+    const areaRaw = it.area;
+    const area =
+      areaRaw != null && String(areaRaw).trim() !== "" ? String(areaRaw) : null;
+    return {
+      due_date,
+      area,
+      assigned_user_id: it.assigned_user_id || null,
+    };
+  };
+
+  const taskDue =
+    taskPayload.due_date != null && taskPayload.due_date !== ""
+      ? Number(taskPayload.due_date)
+      : null;
+  const taskDueOk =
+    taskDue != null && Number.isInteger(taskDue) && taskDue >= 1 && taskDue <= 28
+      ? taskDue
+      : null;
+
+  let normalized =
+    items.length > 0
+      ? items.map(mapRow)
+      : [
+          {
+            due_date: taskDueOk,
+            area: taskPayload.area || null,
+            assigned_user_id: taskPayload.assigned_user_id || null,
+          },
+        ];
+
+  while (normalized.length < freq) {
+    normalized.push({ due_date: null, area: null, assigned_user_id: null });
+  }
+  if (normalized.length > freq) {
+    normalized = normalized.slice(0, freq);
+  }
+
+  taskPayload.non_routine_items = normalized;
+}
 
 class TaskUsecase {
   constructor(taskRepository, taskScheduleRepository, taskLogRepository, taskParentRepository) {
@@ -15,6 +92,7 @@ class TaskUsecase {
         console.log("im here1", ctx)
         let createData = {
           name: data.name,
+          is_routine: data.is_routine !== undefined ? data.is_routine : true,
           is_main_task: data.is_main_task,
           is_need_validation: data.is_need_validation,
           is_scan: data.is_scan,
@@ -24,6 +102,15 @@ class TaskUsecase {
           role_id: data.role_id,
           is_all_times: data.is_all_times,
           task_group_id: data.task_group_id || null,
+          monthly_frequency: data.monthly_frequency !== undefined ? parseInt(data.monthly_frequency, 10) : null,
+          due_date: data.due_date !== undefined && data.due_date !== null ? parseInt(data.due_date, 10) : null,
+          area: data.area || null,
+          assigned_user_id: data.assigned_user_id || null,
+          non_routine_items: Array.isArray(data.non_routine_items) ? data.non_routine_items : null,
+          non_routine_group_id:
+            data.is_routine === false
+              ? data.non_routine_group_id || randomUUID()
+              : null,
           created_by: ctx.userId,
         };
         const task = await this.taskRepository.create(t, createData, ctx);
@@ -118,6 +205,7 @@ class TaskUsecase {
         // Update task data
         let updateData = {};
         if (data.name !== undefined) updateData.name = data.name;
+        if (data.is_routine !== undefined) updateData.is_routine = data.is_routine;
         if (data.is_main_task !== undefined) updateData.is_main_task = data.is_main_task;
         if (data.is_need_validation !== undefined) updateData.is_need_validation = data.is_need_validation;
         if (data.is_scan !== undefined) updateData.is_scan = data.is_scan;
@@ -127,6 +215,21 @@ class TaskUsecase {
         if (data.role_id !== undefined) updateData.role_id = data.role_id;
         if (data.is_all_times !== undefined) updateData.is_all_times = data.is_all_times;
         if (data.task_group_id !== undefined) updateData.task_group_id = data.task_group_id;
+        if (data.monthly_frequency !== undefined) updateData.monthly_frequency = data.monthly_frequency !== null ? parseInt(data.monthly_frequency, 10) : null;
+        if (data.due_date !== undefined) updateData.due_date = data.due_date !== null ? parseInt(data.due_date, 10) : null;
+        if (data.area !== undefined) updateData.area = data.area || null;
+        if (data.assigned_user_id !== undefined) updateData.assigned_user_id = data.assigned_user_id || null;
+        if (data.non_routine_items !== undefined) updateData.non_routine_items = Array.isArray(data.non_routine_items) ? data.non_routine_items : null;
+        if (data.is_routine === true) {
+          updateData.non_routine_group_id = null;
+        } else if (data.non_routine_group_id !== undefined) {
+          updateData.non_routine_group_id = data.non_routine_group_id || null;
+        } else if (data.is_routine === false) {
+          const existingJson = existingTask.toJSON ? existingTask.toJSON() : existingTask;
+          if (!existingJson.non_routine_group_id) {
+            updateData.non_routine_group_id = randomUUID();
+          }
+        }
         updateData.updated_by = ctx.userId;
         updateData.updated_at = new Date(); // Update the updated_at timestamp
 
@@ -267,6 +370,7 @@ class TaskUsecase {
         const cleanedTask = {
           id: taskJson.id,
           name: taskJson.name,
+          is_routine: taskJson.is_routine,
           is_main_task: taskJson.is_main_task,
           is_need_validation: taskJson.is_need_validation,
           is_scan: taskJson.is_scan,
@@ -276,6 +380,12 @@ class TaskUsecase {
           role_id: taskJson.role_id,
           is_all_times: taskJson.is_all_times,
           task_group_id: taskJson.task_group_id,
+          monthly_frequency: taskJson.monthly_frequency,
+          due_date: taskJson.due_date,
+          area: taskJson.area,
+          assigned_user_id: taskJson.assigned_user_id,
+          non_routine_items: taskJson.non_routine_items,
+          non_routine_group_id: taskJson.non_routine_group_id,
           created_by: taskJson.created_by,
           created_at: taskJson.created_at,
           updated_at: taskJson.updated_at,
@@ -420,7 +530,9 @@ class TaskUsecase {
           is_active: taskGroup.is_active
         };
       }
-      
+
+      normalizeNonRoutineDetailResponse(cleanedTask);
+
       return cleanedTask;
     } catch (error) {
       ctx.log?.error(
@@ -441,6 +553,7 @@ class TaskUsecase {
         const cleanedTask = {
           id: task.id,
           name: task.name,
+          is_routine: task.is_routine,
           is_main_task: task.is_main_task,
           is_need_validation: task.is_need_validation,
           is_scan: task.is_scan,
@@ -450,6 +563,12 @@ class TaskUsecase {
           role_id: task.role_id,
           is_all_times: task.is_all_times,
           task_group_id: task.task_group_id,
+          monthly_frequency: task.monthly_frequency,
+          due_date: task.due_date,
+          area: task.area,
+          assigned_user_id: task.assigned_user_id,
+          non_routine_items: task.non_routine_items,
+          non_routine_group_id: task.non_routine_group_id,
           created_by: task.created_by,
           created_at: task.created_at,
           updated_at: task.updated_at,

@@ -67,6 +67,12 @@ UserTask.init({
     allowNull: true,
     comment: 'Schedule time from task_schedules (HH:mm format)'
   },
+  is_routine: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: true,
+    comment: 'true: rutin (generate shift); false: non-rutin (bulanan)',
+  },
   created_at: {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW,
@@ -87,6 +93,7 @@ UserTask.init({
     { fields: ['code'] },
     { fields: ['is_main_task'] },
     { fields: ['parent_user_task_id'] },
+    { fields: ['user_id', 'is_routine'] },
   ],
 });
 

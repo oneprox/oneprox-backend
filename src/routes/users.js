@@ -1,13 +1,21 @@
 const { Router } = require("express");
-const { body, validationResult, param } = require("express-validator");
+const { body, validationResult, param, query } = require("express-validator");
 const { authMiddleware, ensureRole } = require("../middleware/auth");
 const { createResponse } = require('../services/response');
 const { UserGenderIntToStr, UserStatusIntToStr } = require("../models/User");
 
 function InitUserRouter(userUsecase, userAccessMenuUsecase) {
   const router = Router();
+  const getUsersParam = [
+    query("asset_id").optional().isUUID().withMessage("asset_id must be a valid UUID"),
+  ];
+
   const getUsers = async (req, res) => {
     req.log?.info({}, "UserRouter.getUsers");
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json(createResponse(null, "bad request", 400, false, {}, errors));
+    }
     if (!req.query.limit) {
       req.query.limit = "10"
     }
@@ -317,7 +325,7 @@ function InitUserRouter(userUsecase, userAccessMenuUsecase) {
   router.use(authMiddleware, ensureRole);
 
   // GET /api/users - List all users
-  router.get("/", getUsers);
+  router.get("/", getUsersParam, getUsers);
   // GET /api/users/permissions - Get current user permissions
   router.get("/permissions", getUserPermission);
   // GET /api/users/menus - Get user accessible menus

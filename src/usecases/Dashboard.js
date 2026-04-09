@@ -3,6 +3,7 @@ const { Op } = require('sequelize');
 const {
   ComplaintReportStatusIntToStr,
 } = require('../models/ComplaintReport');
+const { nonRoutineDueEndMoment, parseNonRoutineNotes } = require('../utils/nonRoutineDue');
 
 class DashboardUsecase {
   constructor(
@@ -1237,6 +1238,160 @@ class DashboardUsecase {
       ctx.log?.error(
         { error: error.message, stack: error.stack },
         'DashboardUsecase.getFinancialTable_error'
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Pekerjaan non rutin untuk dashboard (semua assignee), filter bulan Jakarta + opsional aset.
+   */
+  async getNonRoutineWork(query = {}, ctx = {}) {
+    try {
+      const moment = require('moment-timezone');
+      const tz = process.env.TASK_DEFAULT_TIMEZONE || 'Asia/Jakarta';
+      const now = moment.tz(tz);
+
+      let date_from = query.date_from;
+      let date_to = query.date_to;
+      if (!date_from || !date_to) {
+        const start = now.clone().startOf('month');
+        const end = now.clone().endOf('month');
+        date_from = start.toISOString();
+        date_to = end.toISOString();
+      }
+
+      const limitParsed = parseInt(query.limit, 10);
+      const offsetParsed = parseInt(query.offset, 10);
+      const limit = Number.isFinite(limitParsed) ? limitParsed : 500;
+      const offset = Number.isFinite(offsetParsed) ? offsetParsed : 0;
+
+      const { rows, total } = await this.userTaskRepository.findNonRoutineDashboardRows(
+        {
+          asset_id: query.asset_id || null,
+          date_from,
+          date_to,
+          limit,
+          offset,
+        },
+        ctx
+      );
+
+      const itemsRaw = rows.map((ut) => {
+        const notesObj = parseNonRoutineNotes(ut.notes);
+        const areaFromNotes =
+          notesObj.area != null && String(notesObj.area).trim() !== ''
+            ? String(notesObj.area).trim()
+            : null;
+        const areaFromTask =
+          ut.task?.area != null && String(ut.task.area).trim() !== ''
+            ? String(ut.task.area).trim()
+            : null;
+        const area = areaFromNotes || areaFromTask || '-';
+        const completed =
+          ut.status === 'completed' || (ut.completed_at != null && ut.completed_at !== '');
+        const hasStarted = ut.start_at != null && ut.start_at !== '';
+
+        const dueEnd = nonRoutineDueEndMoment(ut.notes, tz);
+        let jatuhTempo = '-';
+        if (dueEnd) {
+          jatuhTempo = dueEnd.clone().startOf('day').toDate().toLocaleDateString('id-ID', {
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric',
+          });
+        } else if (ut.start_at) {
+          jatuhTempo = new Date(ut.start_at).toLocaleDateString('id-ID', {
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric',
+          });
+        }
+
+        let status = 'Belum Dijalankan';
+        let status_tone = 'secondary';
+
+        if (completed) {
+          status = 'Selesai';
+          status_tone = 'success';
+        } else if (dueEnd && now.isAfter(dueEnd)) {
+          status = 'Telah Jatuh Tempo';
+          status_tone = 'destructive';
+        } else {
+          let daysLeft = null;
+          if (dueEnd) {
+            daysLeft = dueEnd.clone().startOf('day').diff(now.clone().startOf('day'), 'days');
+          }
+          const inWeek = daysLeft !== null && daysLeft >= 0 && daysLeft <= 7;
+          const inTwoWeeks = daysLeft !== null && daysLeft >= 8 && daysLeft <= 14;
+
+          if (hasStarted) {
+            status = 'Dalam Proses';
+            if (inWeek) status_tone = 'warning';
+            else if (inTwoWeeks) status_tone = 'info';
+            else status_tone = 'default';
+          } else {
+            status = 'Belum Dijalankan';
+            if (inWeek) status_tone = 'warning';
+            else if (inTwoWeeks) status_tone = 'info';
+            else status_tone = 'secondary';
+          }
+        }
+
+        const sortKey = (() => {
+          if (status_tone === 'destructive') return 0;
+          if (status_tone === 'warning') return 1;
+          if (status_tone === 'info') return 2;
+          if (status === 'Dalam Proses') return 3;
+          if (status === 'Belum Dijalankan') return 4;
+          if (status === 'Selesai') return 5;
+          return 6;
+        })();
+        const deadlineTs = dueEnd ? dueEnd.valueOf() : ut.start_at ? new Date(ut.start_at).getTime() : Number.MAX_SAFE_INTEGER;
+
+        return {
+          id: ut.id,
+          nama: ut.user?.name || '-',
+          aset: ut.task?.asset?.name || '-',
+          area,
+          jatuhTempo,
+          jenisPekerjaan: 'Non Rutin',
+          deskripsiPekerjaan: ut.task?.name || '-',
+          status,
+          status_tone,
+          sortKey,
+          deadlineTs,
+        };
+      });
+
+      itemsRaw.sort((a, b) => {
+        if (a.sortKey !== b.sortKey) return a.sortKey - b.sortKey;
+        return a.deadlineTs - b.deadlineTs;
+      });
+
+      const items = itemsRaw.map(({ sortKey, deadlineTs, ...row }) => row);
+
+      const summary = {
+        total: items.length,
+        selesai: items.filter((i) => i.status_tone === 'success').length,
+        telah_jatuh_tempo: items.filter((i) => i.status_tone === 'destructive').length,
+        satu_minggu: items.filter((i) => i.status_tone === 'warning').length,
+        dua_minggu: items.filter((i) => i.status_tone === 'info').length,
+        dalam_proses: items.filter((i) => i.status === 'Dalam Proses').length,
+        belum_dijalankan: items.filter((i) => i.status === 'Belum Dijalankan').length,
+      };
+
+      return {
+        items,
+        summary,
+        total,
+        date_from,
+        date_to,
+      };
+    } catch (error) {
+      ctx.log?.error(
+        { error: error.message, stack: error.stack },
+        'DashboardUsecase.getNonRoutineWork_error'
       );
       throw error;
     }

@@ -13,6 +13,10 @@ Task.init({
     type: DataTypes.STRING,
     allowNull: false,
   },
+  is_routine: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: true,
+  },
   is_main_task: {
     type: DataTypes.BOOLEAN,
     defaultValue: false,
@@ -44,6 +48,30 @@ Task.init({
   },
   task_group_id: {
     type: DataTypes.BIGINT,
+    allowNull: true,
+  },
+  monthly_frequency: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
+  due_date: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
+  area: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  assigned_user_id: {
+    type: DataTypes.UUID,
+    allowNull: true,
+  },
+  non_routine_items: {
+    type: DataTypes.JSONB,
+    allowNull: true,
+  },
+  non_routine_group_id: {
+    type: DataTypes.UUID,
     allowNull: true,
   },
   created_by: {

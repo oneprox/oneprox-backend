@@ -185,7 +185,12 @@ async function updateTenantPaymentStatus({ tenantRepository, tenantPaymentLogRep
   }
 }
 
-function InitInternalRouter({ tenantRepository, tenantPaymentLogRepository, userTaskEvidenceRepository }) {
+function InitInternalRouter({
+  tenantRepository,
+  tenantPaymentLogRepository,
+  userTaskEvidenceRepository,
+  userTaskUsecase,
+}) {
   const router = Router();
 
   // Protect everything under /api/internal with basic auth
@@ -508,6 +513,60 @@ function InitInternalRouter({ tenantRepository, tenantPaymentLogRepository, user
           message: err.message,
           name: err.name
         }));
+      }
+    }
+  );
+
+  /**
+   * POST /api/internal/user-tasks/generate-non-routine-monthly?year=2026&month=4&dryRun=true&include_details=false
+   *
+   * Generates one user_task per non-routine task frequency slot for the calendar month.
+   * Idempotent via user_tasks.code = NR:{taskId}:{YYYY-MM}:{slotIndex}.
+   * Intended for monthly cron (Basic Auth).
+   */
+  router.post(
+    '/user-tasks/generate-non-routine-monthly',
+    [
+      query('year').optional().isInt({ min: 2000, max: 2100 }).withMessage('year must be 2000–2100'),
+      query('month').optional().isInt({ min: 1, max: 12 }).withMessage('month must be 1–12'),
+    ],
+    async (req, res) => {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json(createResponse(null, 'bad request', 400, false, {}, errors));
+      }
+
+      const dryRun = String(req.query.dryRun || 'false').toLowerCase() === 'true';
+      const includeDetails =
+        String(req.query.include_details || 'true').toLowerCase() !== 'false';
+
+      const year = req.query.year != null ? Number(req.query.year) : undefined;
+      const month = req.query.month != null ? Number(req.query.month) : undefined;
+
+      try {
+        req.log?.info({ year, month, dryRun }, 'InternalRouter.generate-non-routine-monthly: start');
+
+        const result = await userTaskUsecase.generateNonRoutineUserTasksForMonth(
+          { year, month, dryRun },
+          { log: req.log }
+        );
+
+        if (!includeDetails) {
+          delete result.details;
+        }
+
+        return res.status(200).json(createResponse(result, 'success', 200));
+      } catch (err) {
+        req.log?.error(
+          { err: err.message, stack: err.stack },
+          'InternalRouter.generate-non-routine-monthly_error'
+        );
+        return res.status(500).json(
+          createResponse(null, 'internal server error', 500, false, {}, {
+            message: err.message,
+            name: err.name,
+          })
+        );
       }
     }
   );

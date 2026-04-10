@@ -3,6 +3,8 @@ const { query, validationResult } = require('express-validator');
 const { basicAuthFromEnv } = require('../middleware/basicAuth');
 const { createResponse } = require('../services/response');
 const { sendTenantPaymentDueSoonEmail } = require('../services/Mailer');
+const fs = require('fs');
+const path = require('path');
 
 function daysLeftFromDeadline(deadline, now = new Date()) {
   const dl = deadline ? new Date(deadline) : null;
@@ -183,7 +185,12 @@ async function updateTenantPaymentStatus({ tenantRepository, tenantPaymentLogRep
   }
 }
 
-function InitInternalRouter({ tenantRepository, tenantPaymentLogRepository }) {
+function InitInternalRouter({
+  tenantRepository,
+  tenantPaymentLogRepository,
+  userTaskEvidenceRepository,
+  userTaskUsecase,
+}) {
   const router = Router();
 
   // Protect everything under /api/internal with basic auth
@@ -380,6 +387,186 @@ function InitInternalRouter({ tenantRepository, tenantPaymentLogRepository }) {
           message: err.message,
           name: err.name
         }));
+      }
+    }
+  );
+
+  /**
+   * DELETE /api/internal/user-task-evidence/old?months=6&dryRun=true
+   *
+   * Deletes physical image files from user_task_evidences that are older than X months.
+   * Database records are kept intact.
+   */
+  router.delete(
+    '/user-task-evidence/old',
+    [
+      query('months').isInt({ min: 1, max: 120 }).withMessage('months must be an integer between 1 and 120'),
+      query('dryRun').optional().isBoolean().withMessage('dryRun must be boolean'),
+    ],
+    async (req, res) => {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json(createResponse(null, 'bad request', 400, false, {}, errors));
+      }
+
+      const months = Number(req.query.months);
+      const dryRun = String(req.query.dryRun || 'false').toLowerCase() === 'true';
+
+      try {
+        req.log?.info({ months, dryRun }, 'InternalRouter.user-task-evidence.old: Starting');
+
+        // Find all evidence records older than X months
+        const oldEvidences = await userTaskEvidenceRepository.findOlderThan(months, { log: req.log });
+
+        req.log?.info({ count: oldEvidences.length }, 'InternalRouter.user-task-evidence.old: Found old evidence records');
+
+        let deletedFiles = 0;
+        let skippedFiles = 0;
+        let fileErrors = 0;
+        const deletedItems = [];
+        const deletionErrors = [];
+
+        for (const evidence of oldEvidences) {
+          const url = evidence.url;
+          
+          // Skip text-based evidence (format: "text:...")
+          if (url && url.startsWith('text:')) {
+            skippedFiles += 1;
+            continue;
+          }
+
+          // Extract filename from URL
+          // URLs can be in format: http://host/uploads/user-task-evidence/filename
+          // or: /uploads/user-task-evidence/filename
+          let filename = null;
+          if (url) {
+            const match = url.match(/\/user-task-evidence\/([^\/\?]+)/);
+            if (match && match[1]) {
+              filename = match[1];
+            }
+          }
+
+          if (!filename) {
+            req.log?.warn({ evidenceId: evidence.id, url }, 'InternalRouter.user-task-evidence.old: Could not extract filename from URL');
+            skippedFiles += 1;
+            continue;
+          }
+
+          const filePath = path.join(process.cwd(), 'public', 'uploads', 'user-task-evidence', filename);
+
+          const item = {
+            evidenceId: evidence.id,
+            userTaskId: evidence.user_task_id,
+            url: evidence.url,
+            filename: filename,
+            createdAt: evidence.created_at,
+            fileExists: false,
+            fileDeleted: false,
+          };
+
+          // Check if file exists and delete it
+          if (fs.existsSync(filePath)) {
+            item.fileExists = true;
+            if (!dryRun) {
+              try {
+                fs.unlinkSync(filePath);
+                item.fileDeleted = true;
+                deletedFiles += 1;
+                req.log?.info({ filePath, evidenceId: evidence.id }, 'InternalRouter.user-task-evidence.old: Deleted file');
+              } catch (err) {
+                fileErrors += 1;
+                item.fileError = err.message;
+                deletionErrors.push({ evidenceId: evidence.id, filePath, error: err.message });
+                req.log?.error({ filePath, evidenceId: evidence.id, error: err.message }, 'InternalRouter.user-task-evidence.old: Failed to delete file');
+              }
+            }
+          } else {
+            req.log?.warn({ filePath, evidenceId: evidence.id }, 'InternalRouter.user-task-evidence.old: File does not exist');
+          }
+
+          deletedItems.push(item);
+        }
+
+        return res.status(200).json(
+          createResponse(
+            {
+              dryRun,
+              months,
+              totalFound: oldEvidences.length,
+              deletedFiles,
+              skippedFiles,
+              fileErrors,
+              errors: deletionErrors.length > 0 ? deletionErrors : undefined,
+              items: deletedItems,
+            },
+            'success',
+            200
+          )
+        );
+      } catch (err) {
+        req.log?.error({ 
+          err: err.message, 
+          stack: err.stack,
+          name: err.name 
+        }, 'InternalRouter.user-task-evidence.old_error');
+        return res.status(500).json(createResponse(null, 'internal server error', 500, false, {}, {
+          message: err.message,
+          name: err.name
+        }));
+      }
+    }
+  );
+
+  /**
+   * POST /api/internal/user-tasks/generate-non-routine-monthly?year=2026&month=4&dryRun=true&include_details=false
+   *
+   * Generates one user_task per non-routine task frequency slot for the calendar month.
+   * Idempotent via user_tasks.code = NR:{taskId}:{YYYY-MM}:{slotIndex}.
+   * Intended for monthly cron (Basic Auth).
+   */
+  router.post(
+    '/user-tasks/generate-non-routine-monthly',
+    [
+      query('year').optional().isInt({ min: 2000, max: 2100 }).withMessage('year must be 2000–2100'),
+      query('month').optional().isInt({ min: 1, max: 12 }).withMessage('month must be 1–12'),
+    ],
+    async (req, res) => {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json(createResponse(null, 'bad request', 400, false, {}, errors));
+      }
+
+      const dryRun = String(req.query.dryRun || 'false').toLowerCase() === 'true';
+      const includeDetails =
+        String(req.query.include_details || 'true').toLowerCase() !== 'false';
+
+      const year = req.query.year != null ? Number(req.query.year) : undefined;
+      const month = req.query.month != null ? Number(req.query.month) : undefined;
+
+      try {
+        req.log?.info({ year, month, dryRun }, 'InternalRouter.generate-non-routine-monthly: start');
+
+        const result = await userTaskUsecase.generateNonRoutineUserTasksForMonth(
+          { year, month, dryRun },
+          { log: req.log }
+        );
+
+        if (!includeDetails) {
+          delete result.details;
+        }
+
+        return res.status(200).json(createResponse(result, 'success', 200));
+      } catch (err) {
+        req.log?.error(
+          { err: err.message, stack: err.stack },
+          'InternalRouter.generate-non-routine-monthly_error'
+        );
+        return res.status(500).json(
+          createResponse(null, 'internal server error', 500, false, {}, {
+            message: err.message,
+            name: err.name,
+          })
+        );
       }
     }
   );

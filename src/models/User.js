@@ -88,7 +88,12 @@ User.associate = (models) => {
   User.belongsTo(models.User, {
     as: 'updatedBy',
     foreignKey: 'updated_by'
-  })
+  });
+
+  User.hasMany(models.UserAsset, {
+    as: 'userAssets',
+    foreignKey: 'user_id',
+  });
 };
 
 module.exports = { User, UserGenderStrToInt, UserGenderIntToStr, UserStatusIntToStr, UserStatusStrToInt };

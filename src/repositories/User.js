@@ -179,6 +179,18 @@ class UserRepository {
         attributes: ["id", "name", "email"],
       },
     ];
+
+    if (filters.asset_id) {
+      whereQuery.include.push({
+        model: this.userModel.sequelize.models.UserAsset,
+        as: "userAssets",
+        attributes: [],
+        required: true,
+        where: {
+          asset_id: filters.asset_id,
+        },
+      });
+    }
     
     // Set order after includes to ensure proper column resolution
     let order;

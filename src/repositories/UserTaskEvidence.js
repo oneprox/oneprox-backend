@@ -1,3 +1,5 @@
+const { Op } = require('sequelize');
+
 class UserTaskEvidenceRepository {
   constructor(userTaskEvidenceModel, userTaskModel) {
     this.userTaskEvidenceModel = userTaskEvidenceModel;
@@ -90,6 +92,27 @@ class UserTaskEvidenceRepository {
       return true;
     } catch (error) {
       ctx.log?.error({ userTaskId, error }, 'UserTaskEvidenceRepository.deleteByUserTaskId_error');
+      throw error;
+    }
+  }
+
+  async findOlderThan(months, ctx = {}) {
+    try {
+      ctx.log?.info({ months }, 'UserTaskEvidenceRepository.findOlderThan');
+      const cutoffDate = new Date();
+      cutoffDate.setMonth(cutoffDate.getMonth() - months);
+      
+      const evidences = await this.userTaskEvidenceModel.findAll({
+        where: {
+          created_at: {
+            [Op.lt]: cutoffDate
+          }
+        },
+        order: [['created_at', 'ASC']]
+      });
+      return evidences.map(evidence => evidence.toJSON());
+    } catch (error) {
+      ctx.log?.error({ months, error }, 'UserTaskEvidenceRepository.findOlderThan_error');
       throw error;
     }
   }

@@ -212,6 +212,55 @@ function InitUserTaskRouter(userTaskUsecase) {
     query("date_to").optional().isISO8601().withMessage("date_to must be a valid ISO 8601 date"),
   ];
 
+  const getNonRoutineUserTasksParam = [
+    query("limit").optional().isInt({ min: 1, max: 500 }).withMessage("limit must be between 1 and 500"),
+    query("offset").optional().isInt({ min: 0 }).withMessage("offset must be non-negative"),
+    query("user_id").optional().isUUID().withMessage("user_id must be a valid UUID"),
+    query("date_from").optional().isISO8601({ strict: false }).withMessage("date_from must be a valid ISO 8601 date"),
+    query("date_to").optional().isISO8601({ strict: false }).withMessage("date_to must be a valid ISO 8601 date"),
+    query("period").optional().matches(/^\d{4}-\d{2}$/).withMessage("period must be YYYY-MM"),
+  ];
+
+  async function getNonRoutineUserTasks(req, res) {
+    try {
+      req.log?.info({ query: req.query }, "UserTaskRouter.getNonRoutineUserTasks");
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res
+          .status(400)
+          .json(createResponse(null, "validation error", 400, errors.array()));
+      }
+
+      const userId = req.query.user_id || req.auth?.userId;
+      if (!userId) {
+        return res.status(401).json(createResponse(null, "Unauthorized: User ID not found", 401));
+      }
+
+      const result = await userTaskUsecase.getNonRoutineUserTasks(userId, req.query, {
+        userId: req.auth?.userId,
+        log: req.log,
+      });
+
+      return res.status(200).json(
+        createResponse(
+          {
+            user_tasks: result.rows,
+            total: result.total,
+            limit: Math.min(500, Math.max(1, parseInt(req.query.limit, 10) || 50)),
+            offset: Math.max(0, parseInt(req.query.offset, 10) || 0),
+          },
+          "success",
+          200
+        )
+      );
+    } catch (error) {
+      req.log?.error({ error: error.message, stack: error.stack }, "UserTaskRouter.getNonRoutineUserTasks");
+      return res
+        .status(500)
+        .json(createResponse(null, error.message || "internal server error", 500));
+    }
+  }
+
   const startUserTaskParam = [
     param("id").isInt().notEmpty(),
   ];
@@ -286,6 +335,7 @@ function InitUserTaskRouter(userTaskUsecase) {
 
   router.post("/generate-upcoming", generateUpcomingUserTasks);
   router.get("/code/:code", getUserTaskByCodeParam, getUserTaskByCode);
+  router.get("/non-routine", getNonRoutineUserTasksParam, getNonRoutineUserTasks);
   router.get("/", getUserTasksParam, getUserTasks);
   router.get("/upcoming", getUpcomingUserTasks);
   router.put("/:id/start", startUserTaskParam, startUserTask);

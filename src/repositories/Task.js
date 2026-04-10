@@ -145,6 +145,12 @@ class TaskRepository {
       if (filters.is_main_task !== undefined) {
         whereClause.is_main_task = filters.is_main_task;
       }
+      if (filters.is_routine !== undefined) {
+        whereClause.is_routine = filters.is_routine;
+      }
+      if (filters.non_routine_group_id) {
+        whereClause.non_routine_group_id = filters.non_routine_group_id;
+      }
       if (filters.role_id) {
         whereClause.role_id = filters.role_id;
       }
@@ -301,6 +307,33 @@ class TaskRepository {
       };
     } catch (error) {
       ctx.log?.error({ filters, error }, "TaskRepository.findAll_error");
+      throw error;
+    }
+  }
+
+  /**
+   * All non-routine task definitions (for monthly user_task generation).
+   */
+  async findAllNonRoutineBare(ctx = {}, transaction = null) {
+    try {
+      ctx.log?.info({}, "TaskRepository.findAllNonRoutineBare");
+      const rows = await this.taskModel.findAll({
+        where: { is_routine: false },
+        attributes: [
+          "id",
+          "name",
+          "is_main_task",
+          "monthly_frequency",
+          "due_date",
+          "area",
+          "assigned_user_id",
+          "non_routine_items",
+        ],
+        transaction,
+      });
+      return rows.map((r) => (r.toJSON ? r.toJSON() : r));
+    } catch (error) {
+      ctx.log?.error({ error }, "TaskRepository.findAllNonRoutineBare_error");
       throw error;
     }
   }

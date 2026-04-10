@@ -16,17 +16,21 @@ class TenantUseCase {
     tenantRepository,
     tenantAttachmentRepository,
     tenantUnitRepository,
+    tenantAssetRepository,
     tenantCategoryMapRepo,
     tenantCategoryRepo,
     unitRepository,
     tenantLogRepository,
     depositoLogRepository,
     userUsecase,
-    tenantPaymentLogRepository
+    tenantPaymentLogRepository,
+    tenantLegalRepository,
+    settingsRepository
   ) {
     this.tenantRepository = tenantRepository;
     this.tenantAttachmentRepository = tenantAttachmentRepository;
     this.tenantUnitRepository = tenantUnitRepository;
+    this.tenantAssetRepository = tenantAssetRepository;
     this.tenantCategoryMapRepo = tenantCategoryMapRepo;
     this.tenantCategoryRepo = tenantCategoryRepo;
     this.unitRepository = unitRepository;
@@ -34,6 +38,8 @@ class TenantUseCase {
     this.depositoLogRepository = depositoLogRepository;
     this.userUsecase = userUsecase;
     this.tenantPaymentLogRepository = tenantPaymentLogRepository;
+    this.tenantLegalRepository = tenantLegalRepository;
+    this.settingsRepository = settingsRepository;
   }
 
   async createTenant(data, ctx) {
@@ -75,8 +81,32 @@ class TenantUseCase {
           throw new Error('user_id is required for creating tenant');
         }
         
-        // Frontend sends: 0 = year, 1 = month (matches DurationUnit constant)
-        // DurationUnit constant: year = 0, month = 1
+        // Handle category: find or create category by name
+        let categoryId = null;
+        if (data.category && typeof data.category === 'string' && data.category.trim()) {
+          ctx.log?.info({ category: data.category }, "TenantUsecase.createTenant - processing category");
+          let category = await this.tenantCategoryRepo.findByName(data.category.trim(), ctx);
+          if (!category) {
+            // Create new category
+            ctx.log?.info({ category: data.category }, "TenantUsecase.createTenant - creating new category");
+            category = await this.tenantCategoryRepo.create({
+              name: data.category.trim(),
+              created_by: ctx.userId,
+              updated_by: ctx.userId,
+            }, ctx, t);
+          }
+          categoryId = category.id;
+          ctx.log?.info({ category_id: categoryId }, "TenantUsecase.createTenant - category resolved");
+        }
+        
+        // Calculate rent_duration and rent_duration_unit from contract dates for backward compatibility
+        // These are still required by the database model
+        const contractBegin = moment(data.contract_begin_at);
+        const contractEnd = moment(data.contract_end_at);
+        const durationInMonths = contractEnd.diff(contractBegin, 'months', true);
+        const durationInYears = contractEnd.diff(contractBegin, 'years', true);
+        
+        let rentDuration;
         let rentDurationUnitInt;
         
         // Use years if duration is >= 1 year, otherwise use months
@@ -85,35 +115,35 @@ class TenantUseCase {
           rentDuration = Math.max(1, Math.round(durationInYears));
           rentDurationUnitInt = DurationUnit.year; // 0
         } else {
-          throw new Error('rent_duration_unit is required and must be 0 (year) or 1 (month)');
+          rentDuration = Math.round(durationInMonths);
+          rentDurationUnitInt = DurationUnit.month; // 1
         }
         
         ctx.log?.info({ 
-          frontend_value: data.rent_duration_unit,
-          stored_value: rentDurationUnitInt 
-        }, "TenantUsecase.createTenant - rent_duration_unit");
-        
-        // Convert integer to string for calculateDueDate function
-        const rentDurationUnitStr = DurationUnitStr[rentDurationUnitInt];
+          contract_begin_at: data.contract_begin_at,
+          contract_end_at: data.contract_end_at,
+          rent_duration: rentDuration,
+          rent_duration_unit: rentDurationUnitInt
+        }, "TenantUsecase.createTenant - calculated rent duration");
         
         const createTenantData = {
           user_id: data.user_id,
           name: data.name,
           contract_begin_at: data.contract_begin_at,
-          contract_end_at: this.calculateDueDate(
-            data.contract_begin_at,
-            data.rent_duration,
-            rentDurationUnitStr
-          ),
+          contract_end_at: data.contract_end_at,
           code: this.generateCode(),
           created_by: data.createdBy,
-          rent_duration: data.rent_duration,
+          rent_duration: rentDuration,
           rent_duration_unit: rentDurationUnitInt,
           payment_term: data.payment_term !== undefined ? data.payment_term : null,
           rent_price: data.rent_price || null,
-          down_payment: data.down_payment || null,
-          deposit: data.deposit || null,
-          category_id: data.category_id || null,
+          down_payment: null, // Removed field
+          deposit: null, // Removed field
+          building_area: data.building_area || null,
+          land_area: data.land_area || null,
+          electricity_power: data.electricity_power || null,
+          category_id: categoryId,
+          sub_category: data.sub_category && typeof data.sub_category === 'string' ? data.sub_category.trim() : null,
           status: this.getTenantStatusInt(data.status) || 2, // Default to pending (2) if not provided
         };
         const tenant = await this.tenantRepository.create(
@@ -137,7 +167,13 @@ class TenantUseCase {
             t,
             ctx
           );
-          await this.saveTenantUnits(tenant, data.unit_ids, t, ctx);
+          
+          // Save units or assets based on building_type
+          if (data.building_type === 'unit' && data.unit_ids && Array.isArray(data.unit_ids) && data.unit_ids.length > 0) {
+            await this.saveTenantUnits(tenant, data.unit_ids, t, ctx);
+          } else if (data.building_type === 'asset' && data.asset_ids && Array.isArray(data.asset_ids) && data.asset_ids.length > 0) {
+            await this.saveTenantAssets(tenant, data.asset_ids, t, ctx);
+          }
         }
 
         const tenantLog = {
@@ -151,25 +187,13 @@ class TenantUseCase {
             rent_duration: tenant.rent_duration,
             rent_duration_unit: DurationUnitStr[tenant.rent_duration_unit], // Convert back to string for log
             rent_price: tenant.rent_price,
-            down_payment: tenant.down_payment,
-            deposit: tenant.deposit,
+            category: data.category || null,
+            sub_category: data.sub_category || null,
           },
           created_by: ctx.userId,
         };
 
         await this.tenantLogRepository.create(tenantLog, ctx);
-        
-        // Create deposito log if deposit is provided
-        if (tenant.deposit !== null && tenant.deposit !== undefined) {
-          const depositoLog = {
-            tenant_id: tenant.id,
-            old_deposit: null,
-            new_deposit: tenant.deposit,
-            reason: 'initial value',
-            created_by: ctx.userId,
-          };
-          await this.depositoLogRepository.create(depositoLog, { ...ctx, transaction: t }, t);
-        }
         
         // Create payment logs if payment_term is provided
         // payment_term: 0 = year, 1 = month
@@ -192,37 +216,24 @@ class TenantUseCase {
           
           ctx.log?.info({ payment_term: paymentTerm }, "TenantUsecase.createTenant - creating payment logs");
           const contractBeginDate = moment(data.contract_begin_at).tz("Asia/Jakarta");
+          const contractEndDate = moment(data.contract_end_at).tz("Asia/Jakarta");
           let numberOfLogs;
           let paymentAmount;
           let dateUnit; // 'years' or 'months'
           
+          // Calculate duration from contract dates
+          
           if (paymentTerm === 0) {
             // Payment term is in years
-            // Convert rent_duration to years if needed
-            // rent_duration_unit is now an integer (0 = year, 1 = month)
-            let rentDurationInYears;
-            if (rentDurationUnitInt === DurationUnit.year || rentDurationUnitInt === 0) {
-              rentDurationInYears = data.rent_duration; // Already in years
-            } else {
-              rentDurationInYears = Math.floor(data.rent_duration / 12); // Convert months to years
-            }
-            
-            numberOfLogs = rentDurationInYears; // 1 payment per year
-            paymentAmount = (tenant.rent_price - tenant.down_payment) / numberOfLogs;
+            const durationInYears = contractEndDate.diff(contractBeginDate, 'years', true);
+            numberOfLogs = Math.max(1, Math.floor(durationInYears)); // At least 1 payment
+            paymentAmount = tenant.rent_price ? tenant.rent_price / numberOfLogs : 0;
             dateUnit = 'years';
           } else if (paymentTerm === 1) {
             // Payment term is in months
-            // Convert rent_duration to months if needed
-            // rent_duration_unit is now an integer (0 = year, 1 = month)
-            let rentDurationInMonths;
-            if (rentDurationUnitInt === DurationUnit.year || rentDurationUnitInt === 0) {
-              rentDurationInMonths = data.rent_duration * 12;
-            } else {
-              rentDurationInMonths = data.rent_duration;
-            }
-            
-            numberOfLogs = rentDurationInMonths; // 1 payment per month
-            paymentAmount = (tenant.rent_price - tenant.down_payment) / numberOfLogs;
+            const durationInMonths = contractEndDate.diff(contractBeginDate, 'months', true);
+            numberOfLogs = Math.max(1, Math.floor(durationInMonths)); // At least 1 payment
+            paymentAmount = tenant.rent_price ? tenant.rent_price / numberOfLogs : 0;
             dateUnit = 'months';
           } else {
             // Invalid payment_term value
@@ -260,6 +271,136 @@ class TenantUseCase {
           }
         }
         
+        // Create legal documents automatically from settings
+        if (this.tenantLegalRepository && this.settingsRepository) {
+          try {
+            // NOTE:
+            // - "setting-option" disimpan sebagai row di table settings, dengan value = 'legal_doc'
+            // - key row tsb jadi identifier/template key (yang nantinya bisa disimpan)
+            // - daftar dokumen legal disimpan di description (format JSON array)
+            // - Jika ada multiple settings dengan value='legal_doc', kita ambil semua
+            const legalDocSettings = await this.settingsRepository.findAllByValue('legal_doc', ctx);
+            
+            if (legalDocSettings && legalDocSettings.length > 0) {
+              ctx.log?.info(
+                { count: legalDocSettings.length },
+                "TenantUsecase.createTenant - found legal_doc setting options"
+              );
+              
+              let totalCreated = 0;
+              
+              // Process each setting with value='legal_doc'
+              for (const legalDocSetting of legalDocSettings) {
+                try {
+                  // Parse description (expecting JSON array)
+                  let legalDocs = [];
+                  
+                  if (legalDocSetting.description && String(legalDocSetting.description).trim()) {
+                    try {
+                      const jsonString = String(legalDocSetting.description).trim();
+                      const parsed = JSON.parse(jsonString);
+                      
+                      if (Array.isArray(parsed)) {
+                        legalDocs = parsed;
+                      } else if (typeof parsed === 'object' && parsed !== null) {
+                        // If single object, wrap in array
+                        legalDocs = [parsed];
+                      } else {
+                        // If string, treat as single doc_type
+                        legalDocs = [{ doc_type: parsed }];
+                      }
+                    } catch (parseError) {
+                      ctx.log?.warn(
+                        { 
+                          setting_key: legalDocSetting.key, 
+                          description: legalDocSetting.description, 
+                          error: parseError.message 
+                        },
+                        "TenantUsecase.createTenant - failed to parse legal_doc description, trying key as doc_type"
+                      );
+                      // Fallback: use key as doc_type if description parsing fails
+                      if (legalDocSetting.key) {
+                        legalDocs = [{ doc_type: String(legalDocSetting.key) }];
+                      }
+                    }
+                  } else {
+                    // If description is empty, use key as doc_type
+                    if (legalDocSetting.key) {
+                      legalDocs = [{ doc_type: String(legalDocSetting.key) }];
+                    }
+                  }
+                  
+                  // Create legal documents for each item
+                  if (legalDocs.length > 0) {
+                    ctx.log?.info(
+                      { setting_key: legalDocSetting.key, count: legalDocs.length }, 
+                      "TenantUsecase.createTenant - creating legal documents from setting"
+                    );
+                    
+                    for (const legalDoc of legalDocs) {
+                      // Validate required fields - doc_type is required
+                      const docType = legalDoc.doc_type || legalDocSetting.key || 'Legal Document';
+                      
+                      const legalDocData = {
+                        tenant_id: tenant.id,
+                        doc_type: String(docType),
+                        due_date: legalDoc.due_date || null,
+                        keterangan: legalDoc.keterangan || null,
+                        document_url: legalDoc.document_url || null,
+                        status: 'belum_selesai',
+                        created_by: ctx.userId,
+                        updated_by: ctx.userId,
+                      };
+                      
+                      await this.tenantLegalRepository.create(legalDocData, { ...ctx, transaction: t }, t);
+                      totalCreated++;
+                      ctx.log?.info(
+                        { doc_type: legalDocData.doc_type }, 
+                        "TenantUsecase.createTenant - created legal document"
+                      );
+                    }
+                  }
+                } catch (settingError) {
+                  ctx.log?.error(
+                    { 
+                      setting_key: legalDocSetting.key, 
+                      error: settingError.message,
+                      stack: settingError.stack 
+                    },
+                    "TenantUsecase.createTenant - error processing legal_doc setting"
+                  );
+                  // Continue with next setting even if one fails
+                }
+              }
+              
+              ctx.log?.info(
+                { total_created: totalCreated },
+                "TenantUsecase.createTenant - completed creating legal documents"
+              );
+            } else {
+              ctx.log?.warn({}, "TenantUsecase.createTenant - no legal_doc setting found");
+            }
+          } catch (legalError) {
+            // Log error but don't fail tenant creation
+            ctx.log?.error(
+              { 
+                error: legalError.message,
+                stack: legalError.stack 
+              }, 
+              "TenantUsecase.createTenant - error creating legal documents"
+            );
+            console.error("Error creating legal documents:", legalError);
+          }
+        } else {
+          ctx.log?.warn(
+            { 
+              has_tenantLegalRepository: !!this.tenantLegalRepository,
+              has_settingsRepository: !!this.settingsRepository
+            },
+            "TenantUsecase.createTenant - repositories not available for legal documents"
+          );
+        }
+        
         return this.tenantToJson(tenant);
       });
 
@@ -291,6 +432,20 @@ class TenantUseCase {
       }, updateCtx);
       
       ctx.log?.info({ unit_id: data[i], updated: !!updatedUnit }, "TenantUsecase.saveTenantUnits - unit status updated");
+    }
+  }
+
+  async saveTenantAssets(tenant, data, t, ctx) {
+    ctx.log?.info({ asset_ids: data }, "TenantUsecase.saveTenantAssets");
+    
+    for (let i = 0; i < data.length; i++) {
+      let dataAsset = {
+        tenant_id: tenant.id,
+        asset_id: data[i],
+      };
+
+      await this.tenantAssetRepository.create(dataAsset, t, ctx);
+      ctx.log?.info({ asset_id: data[i] }, "TenantUsecase.saveTenantAssets - asset linked to tenant");
     }
   }
 

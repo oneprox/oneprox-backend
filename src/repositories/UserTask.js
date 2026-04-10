@@ -40,6 +40,7 @@ class UserTaskRepository {
         is_main_task: data.is_main_task !== undefined ? data.is_main_task : false,
         parent_user_task_id: data.parent_user_task_id || null,
         time: data.time || null,
+        is_routine: data.is_routine !== undefined ? Boolean(data.is_routine) : true,
       }, { transaction: tx });
       return userTask.toJSON();
     } catch (error) {
@@ -210,8 +211,8 @@ class UserTaskRepository {
         }
       }
       
-      // Step 1: Get all user tasks from this user, ordered by created_at DESC to find the latest code
-      const codeWhereClause = { user_id: userId, ...dateFilter };
+      // Step 1: Hanya task rutin — hindari code NR:* jadi "latest" dan merusak batch shift
+      const codeWhereClause = { user_id: userId, is_routine: true, ...dateFilter };
       const allUserTasksForCode = await this.userTaskModel.findAll({
         where: codeWhereClause,
         order: [['created_at', 'DESC']],
@@ -409,6 +410,206 @@ class UserTaskRepository {
     }
   }
 
+  /**
+   * User tasks whose definition task is non-routine (is_routine = false).
+   * Flat list; no batch grouping by code.
+   */
+  async findNonRoutineByUserId(userId, queryParams = {}, ctx = {}) {
+    try {
+      ctx.log?.info({ userId, queryParams }, 'UserTaskRepository.findNonRoutineByUserId');
+      const {
+        limit = 50,
+        offset = 0,
+        date_from = null,
+        date_to = null,
+        period = null,
+      } = queryParams;
+
+      let dateFilter = {};
+      if (date_from || date_to) {
+        dateFilter.created_at = {};
+        if (date_from) {
+          const fromDate = new Date(date_from);
+          fromDate.setHours(0, 0, 0, 0);
+          dateFilter.created_at[Op.gte] = fromDate;
+        }
+        if (date_to) {
+          const toDate = new Date(date_to);
+          toDate.setHours(23, 59, 59, 999);
+          dateFilter.created_at[Op.lte] = toDate;
+        }
+      }
+
+      const whereClause = { user_id: userId, is_routine: false, ...dateFilter };
+      if (period && typeof period === 'string' && /^\d{4}-\d{2}$/.test(period.trim())) {
+        const p = period.trim();
+        whereClause.notes = { [Op.like]: `%"period":"${p}"%` };
+      }
+
+      const Role = require('../models/Role');
+      const { Asset } = require('../models/Asset');
+
+      const { rows, count } = await this.userTaskModel.findAndCountAll({
+        where: whereClause,
+        limit: Math.min(500, Math.max(1, parseInt(limit, 10) || 50)),
+        offset: Math.max(0, parseInt(offset, 10) || 0),
+        order: [
+          ['start_at', 'ASC'],
+          ['id', 'ASC'],
+        ],
+        distinct: true,
+        include: [
+          {
+            model: this.taskModel,
+            as: 'task',
+            required: false,
+            attributes: [
+              'id',
+              'name',
+              'duration',
+              'is_scan',
+              'scan_code',
+              'is_need_validation',
+              'is_routine',
+              'monthly_frequency',
+              'asset_id',
+              'role_id',
+              'non_routine_items',
+              'area',
+            ],
+            include: [
+              {
+                model: Role,
+                as: 'role',
+                attributes: ['id', 'name', 'level'],
+                required: false,
+              },
+              {
+                model: Asset,
+                as: 'asset',
+                attributes: ['id', 'name', 'code'],
+                required: false,
+              },
+            ],
+          },
+          {
+            model: this.userTaskEvidenceModel,
+            as: 'evidences',
+            attributes: ['id', 'user_task_id', 'url', 'created_at'],
+          },
+        ],
+      });
+
+      const list = rows.map((ut) => {
+        const j = ut.toJSON();
+        if (j.status !== undefined) {
+          j.status = UserTaskStatusIntToStr[j.status] || 'pending';
+        }
+        return j;
+      });
+
+      return { rows: list, total: count };
+    } catch (error) {
+      ctx.log?.error({ userId, queryParams, error }, 'UserTaskRepository.findNonRoutineByUserId_error');
+      throw error;
+    }
+  }
+
+  /**
+   * Semua user_task non-rutin untuk dashboard (bukan per user login).
+   * @param {{ asset_id?: string, date_from?: string|Date, date_to?: string|Date, limit?: number, offset?: number }} filters
+   */
+  async findNonRoutineDashboardRows(filters = {}, ctx = {}) {
+    try {
+      ctx.log?.info({ filters }, 'UserTaskRepository.findNonRoutineDashboardRows');
+      const {
+        asset_id = null,
+        date_from = null,
+        date_to = null,
+        limit = 500,
+        offset = 0,
+      } = filters;
+
+      let dateFilter = {};
+      if (date_from || date_to) {
+        dateFilter.created_at = {};
+        if (date_from) {
+          const fromDate = new Date(date_from);
+          fromDate.setHours(0, 0, 0, 0);
+          dateFilter.created_at[Op.gte] = fromDate;
+        }
+        if (date_to) {
+          const toDate = new Date(date_to);
+          toDate.setHours(23, 59, 59, 999);
+          dateFilter.created_at[Op.lte] = toDate;
+        }
+      }
+
+      const whereClause = { is_routine: false, ...dateFilter };
+
+      const taskIncludeWhere = {};
+      if (asset_id) {
+        taskIncludeWhere.asset_id = asset_id;
+      }
+
+      const Role = require('../models/Role');
+      const { Asset } = require('../models/Asset');
+
+      const { rows, count } = await this.userTaskModel.findAndCountAll({
+        where: whereClause,
+        limit: Math.min(500, Math.max(1, parseInt(limit, 10) || 500)),
+        offset: Math.max(0, parseInt(offset, 10) || 0),
+        order: [
+          ['start_at', 'ASC'],
+          ['id', 'ASC'],
+        ],
+        distinct: true,
+        include: [
+          {
+            model: this.userModel,
+            as: 'user',
+            attributes: ['id', 'name', 'email'],
+            required: false,
+          },
+          {
+            model: this.taskModel,
+            as: 'task',
+            required: true,
+            ...(Object.keys(taskIncludeWhere).length > 0 ? { where: taskIncludeWhere } : {}),
+            attributes: ['id', 'name', 'asset_id', 'role_id', 'duration', 'area'],
+            include: [
+              {
+                model: Role,
+                as: 'role',
+                attributes: ['id', 'name'],
+                required: false,
+              },
+              {
+                model: Asset,
+                as: 'asset',
+                attributes: ['id', 'name', 'code'],
+                required: false,
+              },
+            ],
+          },
+        ],
+      });
+
+      const list = rows.map((r) => {
+        const j = r.toJSON();
+        if (j.status !== undefined) {
+          j.status = UserTaskStatusIntToStr[j.status] || 'pending';
+        }
+        return j;
+      });
+
+      return { rows: list, total: count };
+    } catch (error) {
+      ctx.log?.error({ filters, error }, 'UserTaskRepository.findNonRoutineDashboardRows_error');
+      throw error;
+    }
+  }
+
   async getUpcomingTasks(userId, hoursAhead = 12, ctx = {}) {
     try {
       ctx.log?.info({ userId, hoursAhead }, 'UserTaskRepository.getUpcomingTasks');
@@ -419,6 +620,7 @@ class UserTaskRepository {
       const userTasks = await this.userTaskModel.findAll({
         where: {
           user_id: userId,
+          is_routine: true,
           start_at: null, // Not started yet
           completed_at: null, // Not completed yet
           created_at: {
@@ -473,6 +675,7 @@ class UserTaskRepository {
       const now = moment().tz('Asia/Jakarta').toDate();
       await this.userTaskModel.update({
         start_at: now,
+        status: 1,
         updated_at: now,
       }, {
         where: { id },
@@ -506,6 +709,19 @@ class UserTaskRepository {
       return userTask;
     } catch (error) {
       ctx.log?.error({ id, notes, error }, 'UserTaskRepository.completeTask_error');
+      throw error;
+    }
+  }
+
+  async findOneByCode(code, ctx = {}, tx = null) {
+    try {
+      const row = await this.userTaskModel.findOne({
+        where: { code },
+        transaction: tx,
+      });
+      return row ? row.toJSON() : null;
+    } catch (error) {
+      ctx.log?.error({ code, error }, 'UserTaskRepository.findOneByCode_error');
       throw error;
     }
   }
@@ -956,7 +1172,8 @@ class UserTaskRepository {
                   code: generationCode,
                   is_main_task: isMainTask,
                   parent_user_task_id: null,
-                  time: scheduleTime
+                  time: scheduleTime,
+                  is_routine: true,
                 },
                 sortData: {
                   is_main_task: taskJson.is_main_task || false,
@@ -1005,7 +1222,8 @@ class UserTaskRepository {
                       code: generationCode,
                       is_main_task: false,
                       parent_user_task_id: null, // Will be set when creating
-                      time: scheduleTime // Same schedule time as parent
+                      time: scheduleTime, // Same schedule time as parent
+                      is_routine: true,
                     },
                     sortData: {
                       is_main_task: childTaskJson.is_main_task || false,
@@ -1057,7 +1275,8 @@ class UserTaskRepository {
                 code: generationCode,
                 is_main_task: isMainTask,
                 parent_user_task_id: null,
-                time: null // No schedule time for tasks without schedules
+                time: null, // No schedule time for tasks without schedules
+                is_routine: true,
               },
               sortData: {
                 is_main_task: taskJson.is_main_task || false,
@@ -1106,7 +1325,8 @@ class UserTaskRepository {
                     code: generationCode,
                     is_main_task: false,
                     parent_user_task_id: null, // Will be set when creating
-                    time: null // No schedule time for tasks without schedules
+                    time: null, // No schedule time for tasks without schedules
+                    is_routine: true,
                   },
                   sortData: {
                     is_main_task: childTaskJson.is_main_task || false,

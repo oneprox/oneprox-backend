@@ -78,19 +78,12 @@ class TenantUseCase {
         // Frontend sends: 0 = year, 1 = month (matches DurationUnit constant)
         // DurationUnit constant: year = 0, month = 1
         let rentDurationUnitInt;
-        if (typeof data.rent_duration_unit === 'number') {
-          // Frontend sends: 0 = year, 1 = month (same as DurationUnit)
-          if (data.rent_duration_unit !== 0 && data.rent_duration_unit !== 1) {
-            throw new Error('rent_duration_unit must be 0 (year) or 1 (month)');
-          }
-          // Use value directly since frontend format matches DurationUnit
-          rentDurationUnitInt = data.rent_duration_unit;
-        } else if (typeof data.rent_duration_unit === 'string') {
-          // String format (for backward compatibility)
-          if (data.rent_duration_unit !== 'year' && data.rent_duration_unit !== 'month') {
-            throw new Error('rent_duration_unit must be either "year" or "month"');
-          }
-          rentDurationUnitInt = DurationUnit[data.rent_duration_unit];
+        
+        // Use years if duration is >= 1 year, otherwise use months
+        // rent_duration is INTEGER in DB — must not store fractional years
+        if (durationInYears >= 1) {
+          rentDuration = Math.max(1, Math.round(durationInYears));
+          rentDurationUnitInt = DurationUnit.year; // 0
         } else {
           throw new Error('rent_duration_unit is required and must be 0 (year) or 1 (month)');
         }

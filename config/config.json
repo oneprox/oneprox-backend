@@ -1,9 +1,16 @@
 {
-  "postgres": {
+  "postgres1": {
     "username": "postgres",
     "password": "CjU8yFMqr@Hr38/",
     "database": "postgres",
     "host": "db.hsabnljpkotemamfalmd.supabase.co",
+    "dialect": "postgres"
+  },
+  "postgres": {
+    "username": "dxndba",
+    "password": "dxnoke",
+    "database": "oneprox",
+    "host": "localhost",
     "dialect": "postgres"
   },
   "mysql": {

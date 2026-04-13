@@ -16,7 +16,8 @@ class DashboardUsecase {
     unitRepository,
     assetRepository,
     tenantPaymentLogRepository,
-    tenantLegalRepository
+    tenantLegalRepository,
+    settingsRepository
   ) {
     this.complaintReportRepository = complaintReportRepository;
     this.tenantRepository = tenantRepository;
@@ -28,6 +29,7 @@ class DashboardUsecase {
     this.assetRepository = assetRepository;
     this.tenantPaymentLogRepository = tenantPaymentLogRepository;
     this.tenantLegalRepository = tenantLegalRepository;
+    this.settingsRepository = settingsRepository;
   }
 
   async getDashboardStats(ctx) {
@@ -975,6 +977,13 @@ class DashboardUsecase {
       const legalTableData = [];
       const now = new Date();
       const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      let legalDocSettings = [];
+      if (this.settingsRepository) {
+        legalDocSettings = await this.settingsRepository.findAllByValue('legal_doc', ctx);
+      }
+      const legalDocDescriptionByKey = new Map(
+        (Array.isArray(legalDocSettings) ? legalDocSettings : []).map((setting) => [setting.key, setting.description || null])
+      );
       
       // Get legal documents for each tenant
       for (const tenant of allTenants) {
@@ -1015,6 +1024,7 @@ class DashboardUsecase {
             legalTableData.push({
               id: legalData.id,
               tenantId: tenantData.id,
+              description: legalDocDescriptionByKey.get(legalData.doc_type) || null,
               nama: tenantData.name || '-',
               aset: assetData.name || '-',
               unit: tenantUnit?.name || '-',

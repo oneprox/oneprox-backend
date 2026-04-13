@@ -248,7 +248,8 @@ const dashboardUsecase = new DashboardUsecase(
   unitRepository,
   assetRepository,
   tenantPaymentLogRepository,
-  tenantLegalRepository
+  tenantLegalRepository,
+  settingsRepository
 );
 
 // initalize router

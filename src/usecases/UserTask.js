@@ -131,6 +131,23 @@ class UserTaskUsecase {
     }
   }
 
+  async getUserTaskById(userTaskId, ctx) {
+    try {
+      ctx.log?.info({ userTaskId }, "UserTaskUsecase.getUserTaskById");
+      const userTask = await this.userTaskRepository.findById(userTaskId, ctx);
+      if (userTask && userTask.evidences) {
+        userTask.evidences = transformEvidenceUrls(userTask.evidences);
+      }
+      return userTask;
+    } catch (error) {
+      ctx.log?.error(
+        { userTaskId, error: error.message },
+        "UserTaskUsecase.getUserTaskById_error"
+      );
+      throw error;
+    }
+  }
+
   async getNonRoutineUserTasks(userId, queryParams, ctx) {
     try {
       ctx.log?.info({ userId, queryParams }, "UserTaskUsecase.getNonRoutineUserTasks");

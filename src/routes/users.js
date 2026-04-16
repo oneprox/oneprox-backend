@@ -8,6 +8,7 @@ function InitUserRouter(userUsecase, userAccessMenuUsecase) {
   const router = Router();
   const getUsersParam = [
     query("asset_id").optional().isUUID().withMessage("asset_id must be a valid UUID"),
+    query("role_id").optional().isInt().withMessage("role_id must be an integer"),
   ];
 
   const getUsers = async (req, res) => {
@@ -24,6 +25,9 @@ function InitUserRouter(userUsecase, userAccessMenuUsecase) {
     }
     const limit = parseInt(req.query.limit, 10) || 10;
     const offset = parseInt(req.query.offset, 10) || 0;
+    if (req.query.role_id !== undefined) {
+      req.query.role_id = parseInt(req.query.role_id, 10);
+    }
     try {
       const users = await userUsecase.listUsers(req.query, {
         requestId: req.requestId,

@@ -319,6 +319,37 @@ function InitUserTaskRouter(userTaskUsecase) {
     }
   }
 
+  async function getUserTaskById(req, res) {
+    try {
+      req.log?.info({ id: req.params.id }, "UserTaskRouter.getUserTaskById");
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res
+          .status(400)
+          .json(createResponse(null, "validation error", 400, errors.array()));
+      }
+
+      const result = await userTaskUsecase.getUserTaskById(req.params.id, {
+        userId: req.auth?.userId,
+        roleName: req.auth?.roleName,
+        log: req.log,
+      });
+
+      if (!result) {
+        return res
+          .status(404)
+          .json(createResponse(null, "user task not found", 404));
+      }
+
+      return res.status(200).json(createResponse(result, "success", 200));
+    } catch (error) {
+      req.log?.error({ error: error.message, stack: error.stack }, "UserTaskRouter.getUserTaskById");
+      return res
+        .status(500)
+        .json(createResponse(null, error.message || "internal server error", 500));
+    }
+  }
+
   const getCompletedTasksParam = [
     query("start_date").optional().matches(/^\d{4}-\d{2}-\d{2}$/).withMessage("start_date must be in YYYY-MM-DD format"),
     query("end_date").optional().matches(/^\d{4}-\d{2}-\d{2}$/).withMessage("end_date must be in YYYY-MM-DD format"),
@@ -330,14 +361,18 @@ function InitUserTaskRouter(userTaskUsecase) {
   const getUserTaskByCodeParam = [
     param("code").isString().notEmpty().withMessage("code is required"),
   ];
+  const getUserTaskByIdParam = [
+    param("id").isInt().notEmpty().withMessage("id must be an integer"),
+  ];
 
   router.use(authMiddleware, ensureRole);
 
   router.post("/generate-upcoming", generateUpcomingUserTasks);
   router.get("/code/:code", getUserTaskByCodeParam, getUserTaskByCode);
   router.get("/non-routine", getNonRoutineUserTasksParam, getNonRoutineUserTasks);
-  router.get("/", getUserTasksParam, getUserTasks);
   router.get("/upcoming", getUpcomingUserTasks);
+  router.get("/:id", getUserTaskByIdParam, getUserTaskById);
+  router.get("/", getUserTasksParam, getUserTasks);
   router.put("/:id/start", startUserTaskParam, startUserTask);
   router.put("/:id/complete", uploadUserTaskEvidenceMiddleware(), compressUploadedImages, completeUserTaskParam, completeUserTask);
 

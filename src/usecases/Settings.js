@@ -1,8 +1,10 @@
 const sequelize = require('../models/sequelize');
 
 class SettingsUsecase {
-  constructor(settingsRepository) {
+  constructor(settingsRepository, tenantRepository = null, tenantLegalRepository = null) {
     this.settingsRepository = settingsRepository;
+    this.tenantRepository = tenantRepository;
+    this.tenantLegalRepository = tenantLegalRepository;
   }
 
   async listAllSettings(ctx) {
@@ -59,6 +61,25 @@ class SettingsUsecase {
           updated_by: ctx.userId,
         };
         const setting = await this.settingsRepository.create(settingData, ctx, t);
+
+        if (data.value === 'legal_doc' && this.tenantRepository && this.tenantLegalRepository) {
+          const tenantResult = await this.tenantRepository.findAll({}, ctx);
+          const tenants = Array.isArray(tenantResult?.tenants) ? tenantResult.tenants : [];
+
+          for (const tenant of tenants) {
+            await this.tenantLegalRepository.create({
+              tenant_id: tenant.id,
+              doc_type: data.key,
+              due_date: null,
+              keterangan: data.description || null,
+              document_url: null,
+              status: 'belum_selesai',
+              created_by: ctx.userId,
+              updated_by: ctx.userId,
+            }, { ...ctx, transaction: t }, t);
+          }
+        }
+
         return setting;
       });
 

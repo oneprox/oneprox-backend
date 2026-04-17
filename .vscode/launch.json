@@ -1,0 +1,41 @@
+{
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch Program",
+      "skipFiles": [
+        "<node_internals>/**"
+      ],
+      "program": "${workspaceFolder}/src/app.js",
+      "env": {
+        "PORT": "3001",
+        "JWT_SECRET": "iW22o+3MUs4kOpCAzTPduqWQXA+bef9LAf6TMORJfnnPjoL+UFFBPvG1e2y8qEQ6",
+        "PGHOST": "db.hsabnljpkotemamfalmd.supabase.co",
+        "PGPORT": "5432",
+        "PGDATABASE": "postgres",
+        "PGUSER": "postgres",
+        "PGPASSWORD": "CjU8yFMqr@Hr38/",
+        "PGSSL": "false",
+        "POSTGRES_URL": "postgresql://postgres.hsabnljpkotemamfalmd:CjU8yFMqr%40Hr38%2F@aws-1-ap-southeast-1.pooler.supabase.com:6543/postgres?sslmode=require",
+        "DB_TYPE": "postgres",
+        "MYSQL_HOST": "localhost",
+        "MYSQL_PORT": "3306",
+        "MYSQL_DATABASE": "oripro",
+        "MYSQL_USER": "root",
+        "MYSQL_PASSWORD": "root",
+        "SMTP_HOST": "smtp.gmail.com",
+        "SMTP_PORT": "465",
+        "SMTP_USER": "k.indrabayu@gmail.com",
+        "SMTP_PASSWORD": "zgcm ahjv ooqo vpgf",
+        "SMTP_SECURE": "false",
+        "MAIL_FROM": "k.indrabayu@gmail.com"
+      }
+    }
+  ]
+}

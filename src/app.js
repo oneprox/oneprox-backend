@@ -236,7 +236,7 @@ const attendanceRepository = new AttendanceRepository();
 const attendanceUsecase = new attendanceUc(attendanceRepository);
 const tenantPaymentLogUsecase = new tenantPaymentLogUc(tenantPaymentLogRepository, tenantRepository);
 const tenantLegalUsecase = new tenantLegalUc(tenantLegalRepository, tenantRepository, settingsRepository);
-const settingsUsecase = new settingsUc(settingsRepository);
+const settingsUsecase = new settingsUc(settingsRepository, tenantRepository, tenantLegalRepository);
 const DashboardUsecase = require('./usecases/Dashboard');
 const dashboardUsecase = new DashboardUsecase(
   complaintReportRepository,

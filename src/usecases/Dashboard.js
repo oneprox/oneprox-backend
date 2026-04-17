@@ -1255,6 +1255,57 @@ class DashboardUsecase {
   }
 
   /**
+   * Endpoint khusus dashboard worker:
+   * mengembalikan task rutin + non-rutin untuk user login.
+   */
+  async getWorkerUserTasks(queryParams = {}, ctx = {}) {
+    try {
+      const userId = ctx.userId;
+      if (!userId) {
+        throw new Error('Unauthorized: User ID not found');
+      }
+
+      const limit = Number.isFinite(parseInt(queryParams.limit, 10))
+        ? parseInt(queryParams.limit, 10)
+        : 100;
+      const offset = Number.isFinite(parseInt(queryParams.offset, 10))
+        ? parseInt(queryParams.offset, 10)
+        : 0;
+
+      const [routineTasks, nonRoutineResult] = await Promise.all([
+        this.userTaskRepository.findByUserId(
+          userId,
+          { limit, offset, date_from: queryParams.date_from, date_to: queryParams.date_to },
+          ctx
+        ),
+        this.userTaskRepository.findNonRoutineByUserId(
+          userId,
+          {
+            limit,
+            offset,
+            date_from: queryParams.date_from,
+            date_to: queryParams.date_to,
+            period: queryParams.period,
+          },
+          ctx
+        ),
+      ]);
+
+      return {
+        routine_tasks: Array.isArray(routineTasks) ? routineTasks : [],
+        non_routine_tasks: Array.isArray(nonRoutineResult?.rows) ? nonRoutineResult.rows : [],
+        non_routine_total: nonRoutineResult?.total || 0,
+      };
+    } catch (error) {
+      ctx.log?.error(
+        { error: error.message, stack: error.stack, queryParams },
+        'DashboardUsecase.getWorkerUserTasks_error'
+      );
+      throw error;
+    }
+  }
+
+  /**
    * Pekerjaan non rutin untuk dashboard (semua assignee), filter bulan Jakarta + opsional aset.
    */
   async getNonRoutineWork(query = {}, ctx = {}) {

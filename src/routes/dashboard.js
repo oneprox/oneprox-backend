@@ -140,6 +140,25 @@ function InitDashboardRouter(dashboardUsecase) {
     }
   });
 
+  router.get('/worker-user-tasks', async (req, res) => {
+    try {
+      req.log?.info({ query: req.query }, 'DashboardRouter.getWorkerUserTasks');
+      const payload = await dashboardUsecase.getWorkerUserTasks(req.query, {
+        userId: req.auth?.userId,
+        log: req.log,
+      });
+      return res
+        .status(200)
+        .json(createResponse(payload, 'Worker user tasks retrieved successfully', 200));
+    } catch (error) {
+      req.log?.error(
+        { error: error.message, stack: error.stack },
+        'DashboardRouter.getWorkerUserTasks_error'
+      );
+      return res.status(500).json(createResponse(null, 'Internal server error', 500));
+    }
+  });
+
   router.get(
     '/non-routine-work',
     [

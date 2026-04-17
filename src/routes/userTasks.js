@@ -210,6 +210,10 @@ function InitUserTaskRouter(userTaskUsecase) {
     query("user_id").optional().isUUID().withMessage("user_id must be a valid UUID"),
     query("date_from").optional().isISO8601().withMessage("date_from must be a valid ISO 8601 date"),
     query("date_to").optional().isISO8601().withMessage("date_to must be a valid ISO 8601 date"),
+    query("routine_latest_batch_only")
+      .optional()
+      .isIn(["0", "1"])
+      .withMessage("routine_latest_batch_only must be 0 or 1"),
   ];
 
   const getNonRoutineUserTasksParam = [

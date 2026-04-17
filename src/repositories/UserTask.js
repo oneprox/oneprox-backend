@@ -192,6 +192,18 @@ class UserTaskRepository {
       ctx.log?.info({ userId, queryParams }, 'UserTaskRepository.findByUserId');
       const { limit = 10, offset = 0, date_from = null, date_to = null } = queryParams;
       const { Op } = require('sequelize');
+
+      const calendarDayKey = (v) => {
+        if (v == null || v === '') return null;
+        const m = String(v).trim().match(/^(\d{4}-\d{2}-\d{2})/);
+        return m ? m[1] : null;
+      };
+      const routineLatestBatchOnlyRaw = queryParams.routine_latest_batch_only;
+      const routineLatestBatchOnly =
+        routineLatestBatchOnlyRaw === true ||
+        routineLatestBatchOnlyRaw === 1 ||
+        routineLatestBatchOnlyRaw === '1' ||
+        routineLatestBatchOnlyRaw === 'true';
       
       // Build date filter if provided
       let dateFilter = {};
@@ -211,8 +223,15 @@ class UserTaskRepository {
         }
       }
       
-      // Step 1: Hanya task rutin — hindari code NR:* jadi "latest" dan merusak batch shift
-      const codeWhereClause = { user_id: userId, is_routine: true, ...dateFilter };
+      // Step 1: Batch rutin terbaru di rentang (abaikan code non-rutin NR:* dan code kosong)
+      const codeWhereClause = {
+        user_id: userId,
+        is_routine: true,
+        ...dateFilter,
+        code: {
+          [Op.and]: [{ [Op.ne]: null }, { [Op.ne]: '' }, { [Op.notLike]: 'NR:%' }],
+        },
+      };
       const allUserTasksForCode = await this.userTaskModel.findAll({
         where: codeWhereClause,
         order: [['created_at', 'DESC']],
@@ -235,10 +254,46 @@ class UserTaskRepository {
         date_to
       }, 'UserTaskRepository.findByUserId - Found latest code');
 
-      // Step 3: Get all user tasks filtered by the latest code (if found) and date range
-      const whereClause = latestCode 
-        ? { user_id: userId, code: latestCode, ...dateFilter }
-        : { user_id: userId, ...dateFilter };
+      // Step 3: Get user tasks.
+      // - Tanpa filter tanggal: tetap pakai latest batch code (perilaku lama).
+      // - Dengan filter tanggal: default semua task di rentang.
+      // - routine_latest_batch_only=1 + date_from & date_to hari yang sama: task rutin hanya batch terbaru
+      //   di hari itu; jika belum ada generate (latestCode null), task rutin tidak ikut (hanya non-rutin).
+      const hasDateFilter = Boolean(date_from || date_to);
+      const dayFrom = calendarDayKey(date_from);
+      const dayTo = calendarDayKey(date_to);
+      const isSameCalendarDay = Boolean(hasDateFilter && dayFrom && dayTo && dayFrom === dayTo);
+      const useRoutineLatestBatch =
+        routineLatestBatchOnly && isSameCalendarDay;
+
+      const shouldUseLatestCode = !hasDateFilter && Boolean(latestCode);
+
+      let whereClause;
+      if (useRoutineLatestBatch) {
+        if (latestCode) {
+          whereClause = {
+            user_id: userId,
+            ...dateFilter,
+            [Op.or]: [{ is_routine: false }, { is_routine: true, code: latestCode }],
+          };
+        } else {
+          whereClause = {
+            user_id: userId,
+            ...dateFilter,
+            is_routine: false,
+          };
+        }
+      } else if (shouldUseLatestCode) {
+        whereClause = { user_id: userId, code: latestCode, ...dateFilter };
+      } else if (hasDateFilter) {
+        whereClause = { user_id: userId, ...dateFilter };
+      } else {
+        whereClause = { user_id: userId };
+      }
+
+      const Role = require('../models/Role');
+      const { Asset } = require('../models/Asset');
+      const TaskGroup = require('../models/TaskGroup');
 
       const { rows, count } = await this.userTaskModel.findAndCountAll({
         where: whereClause,
@@ -249,7 +304,27 @@ class UserTaskRepository {
           {
             model: this.taskModel,
             as: 'task',
-            required: false // Don't require task - some user_tasks might not have matching tasks
+            required: false, // Don't require task - some user_tasks might not have matching tasks
+            include: [
+              {
+                model: Role,
+                as: 'role',
+                attributes: ['id', 'name', 'level'],
+                required: false,
+              },
+              {
+                model: Asset,
+                as: 'asset',
+                attributes: ['id', 'name', 'code'],
+                required: false,
+              },
+              {
+                model: TaskGroup,
+                as: 'taskGroup',
+                attributes: ['id', 'name'],
+                required: false,
+              },
+            ],
           },
           {
             model: this.userTaskEvidenceModel,

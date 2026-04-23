@@ -1296,8 +1296,17 @@ class DashboardUsecase {
         ),
       ]);
 
+      const routineOnlyTasks = (Array.isArray(routineTasks) ? routineTasks : []).filter((userTask) => {
+        if (!userTask) return false;
+        // Keep only routine user_task and routine task definition.
+        // This guards against any mixed payload from findByUserId.
+        const isRoutineUserTask = userTask.is_routine !== false;
+        const isRoutineTaskType = userTask.task?.is_routine !== false;
+        return isRoutineUserTask && isRoutineTaskType;
+      });
+
       return {
-        routine_tasks: Array.isArray(routineTasks) ? routineTasks : [],
+        routine_tasks: routineOnlyTasks,
         non_routine_tasks: Array.isArray(nonRoutineResult?.rows) ? nonRoutineResult.rows : [],
         non_routine_total: nonRoutineResult?.total || 0,
       };

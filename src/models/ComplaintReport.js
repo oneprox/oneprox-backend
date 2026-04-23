@@ -79,6 +79,11 @@ ComplaintReport.init({
     allowNull: true,
     comment: 'Tenant ID (only for complaints, null for reports)'
   },
+  asset_id: {
+    type: DataTypes.UUID,
+    allowNull: true,
+    comment: 'Asset ID related to complaint/report'
+  },
   status: {
     type: DataTypes.INTEGER,
     defaultValue: 0, // pending
@@ -122,6 +127,10 @@ ComplaintReport.associate = (models) => {
   ComplaintReport.belongsTo(models.Tenant, {
     foreignKey: 'tenant_id',
     as: 'tenant',
+  });
+  ComplaintReport.belongsTo(models.Asset, {
+    foreignKey: 'asset_id',
+    as: 'asset',
   });
   ComplaintReport.belongsTo(models.User, {
     foreignKey: 'created_by',

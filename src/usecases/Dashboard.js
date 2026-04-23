@@ -1004,12 +1004,10 @@ class DashboardUsecase {
           
           legalArray.forEach((legal) => {
             const legalData = legal.toJSON ? legal.toJSON() : legal;
-            if (!legalData.due_date || legalData.status === 'selesai') return;
+            if (!legalData.due_date) return;
             
             const dueDate = new Date(legalData.due_date);
             const dueDay = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
-            const legalRowStatus = dueDay < startOfToday ? 'Overdue' : 'On Process';
-            
             const tenantUnit = tenantUnitsForLegal[0];
             const asset = tenantUnit?.asset || (tenantUnit?.asset_id ? filteredAssets.find(a => {
               const assetData = a.toJSON ? a.toJSON() : a;
@@ -1038,7 +1036,7 @@ class DashboardUsecase {
               progress: 0,
               dokumen: legalData.keterangan || legalData.doc_type || '-',
               dokumenUrl: legalData.document_url || null,
-              status: legalRowStatus,
+              status: legalData.status || '',
               tipe: 'legal'
             });
           });
@@ -1168,6 +1166,12 @@ class DashboardUsecase {
           
           const payments = await this.tenantPaymentLogRepository.findByTenantId(tenantData.id, { limit: 1000 }, ctx);
           const paymentArray = Array.isArray(payments) ? payments : (payments?.rows || payments?.data || []);
+          const tenantRentPrice = parseFloat(tenantData.rent_price) || 0;
+          const totalAllPayments = paymentArray.reduce((sum, payment) => {
+            const paymentData = payment.toJSON ? payment.toJSON() : payment;
+            return sum + (parseFloat(paymentData.paid_amount) || 0);
+          }, 0);
+          const remainingRentValue = Math.max(0, tenantRentPrice - totalAllPayments);
           
           paymentArray.forEach((payment) => {
             const paymentData = payment.toJSON ? payment.toJSON() : payment;
@@ -1223,6 +1227,7 @@ class DashboardUsecase {
               deskripsi: deskripsi,
               nomorInvoice: `INV-${paymentData.id}`,
               nilaiInvoice: parseFloat(paymentData.amount) || parseFloat(paymentData.billing_amount) || 0,
+              sisaNilai: remainingRentValue,
               tanggalInvoice: paymentData.created_at ? new Date(paymentData.created_at).toLocaleDateString('id-ID') : '-',
               status: status,
               aging: aging > 0 ? aging : 0,

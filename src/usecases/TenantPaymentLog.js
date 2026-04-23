@@ -78,6 +78,24 @@ class TenantPaymentLogUsecase {
         }
       }
 
+      // Auto-derive payment status from paid_amount when explicitly provided:
+      // paid_amount <= 0  => unpaid
+      // paid_amount > 0   => paid
+      if (updateData.paid_amount !== undefined && updateData.paid_amount !== null) {
+        const paidAmountNumber = Number(updateData.paid_amount);
+        if (!Number.isNaN(paidAmountNumber)) {
+          updateData.status = paidAmountNumber > 0 ? 1 : 0;
+          if (paidAmountNumber <= 0) {
+            updateData.payment_date = null;
+            updateData.payment_method = null;
+            updateData.outstanding = null;
+            updateData.overdue = null;
+            updateData.rate = null;
+            updateData.last_charge_date = null;
+          }
+        }
+      }
+
       // Update payment log
       const updatedPaymentLog = await this.tenantPaymentLogRepository.update(id, {
         ...updateData,
@@ -173,13 +191,16 @@ class TenantPaymentLogUsecase {
     }
   }
 
-  async deletePaymentLog(id, ctx) {
+  async deletePaymentLog(id, tenantId, ctx) {
     try {
-      ctx.log?.info({ id }, "TenantPaymentLogUsecase.deletePaymentLog");
+      ctx.log?.info({ id, tenantId }, "TenantPaymentLogUsecase.deletePaymentLog");
       
       // Verify payment log exists
       const paymentLog = await this.tenantPaymentLogRepository.findById(id, ctx);
       if (!paymentLog) {
+        throw new Error('Payment log not found');
+      }
+      if (tenantId && paymentLog.tenant_id !== tenantId) {
         throw new Error('Payment log not found');
       }
 
@@ -187,7 +208,7 @@ class TenantPaymentLogUsecase {
       return true;
     } catch (error) {
       ctx.log?.error(
-        { id, error: error.message },
+        { id, tenantId, error: error.message },
         "TenantPaymentLogUsecase.deletePaymentLog_error"
       );
       throw error;

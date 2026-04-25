@@ -811,21 +811,41 @@ class DashboardUsecase {
         tenantData.units = units;
         return tenantData;
       });
+
+      const filteredAssetIds = new Set(
+        filteredAssets.map((a) => {
+          const ad = a.toJSON ? a.toJSON() : a;
+          return ad.id;
+        })
+      );
+
+      const allAssetUnitsNested = await Promise.all(
+        [...filteredAssetIds].map((aid) =>
+          this.unitRepository.findAll(
+            { asset_id: aid, limit: 20000, is_deleted: false },
+            ctx
+          )
+        )
+      );
+      const allAssetUnits = [];
+      allAssetUnitsNested.forEach((res) => {
+        const list = res?.units ?? [];
+        allAssetUnits.push(...list);
+      });
       
       // Calculate overview data dari tenant aktif
       let totalLandArea = 0;
       let totalBuildingArea = 0;
-      let occupiedUnits = 0;
       let totalUnits = 0;
       let totalRevenue = 0;
       
       filteredAssets.forEach(asset => {
         const assetData = asset.toJSON ? asset.toJSON() : asset;
         
-        // Get units for this asset
-        const assetUnits = allUnits.filter(u => {
-          const unitData = u.toJSON ? u.toJSON() : u;
-          return unitData.asset_id === assetData.id || unitData.asset?.id === assetData.id;
+        // Get units for this asset (semua unit di aset, termasuk yang belum berpenghuni)
+        const assetUnits = allAssetUnits.filter((u) => {
+          const aid = u.asset?.id ?? u.asset_id;
+          return aid === assetData.id;
         });
         totalUnits += assetUnits.length;
         
@@ -844,8 +864,6 @@ class DashboardUsecase {
           });
         });
         
-        occupiedUnits += assetTenants.length;
-        
         // Calculate land area dan building area dari tenant aktif
         assetTenants.forEach(tenant => {
           const tenantLandArea = parseFloat(tenant.land_area) || 0;
@@ -860,16 +878,55 @@ class DashboardUsecase {
           totalRevenue += rentPrice;
         });
       });
-      
+
+      const unitsInScope = new Set();
+      allAssetUnits.forEach((u) => {
+        if (!u || u.id == null) return;
+        const aid = u.asset?.id ?? u.asset_id;
+        if (aid != null && filteredAssetIds.has(aid)) {
+          unitsInScope.add(u.id);
+        }
+      });
+
+      // Satu unit dihitung sekali; kategori = sektor tenant pertama yang mengisi unit
+      const unitIdToCategory = new Map();
+      activeTenants.forEach((tenant) => {
+        const categoryName = tenant.category?.name || 'Lainnya';
+        if (!tenant.units || !Array.isArray(tenant.units)) return;
+        tenant.units.forEach((tu) => {
+          const unitId = tu.id;
+          if (!unitId || !unitsInScope.has(unitId)) return;
+          if (!unitIdToCategory.has(unitId)) {
+            unitIdToCategory.set(unitId, categoryName);
+          }
+        });
+      });
+
+      const occupiedUnits = unitIdToCategory.size;
       const occupancy = totalUnits > 0 ? (occupiedUnits / totalUnits) * 100 : 0;
       const averageRate = totalBuildingArea > 0 ? totalRevenue / totalBuildingArea : 0;
-      
-      // Calculate utilization data berdasarkan jumlah tenant per kategori
+
       const utilizationMap = new Map();
+      for (const cat of unitIdToCategory.values()) {
+        utilizationMap.set(cat, (utilizationMap.get(cat) || 0) + 1);
+      }
+
+      const availableUnits = Math.max(0, totalUnits - occupiedUnits);
+      const utilizationSlices = Array.from(utilizationMap.entries())
+        .map(([category, value]) => ({ category, value }))
+        .sort((a, b) => b.value - a.value);
+
+      if (availableUnits > 0) {
+        utilizationSlices.push({ category: 'Tersedia', value: availableUnits });
+      }
+
+      const utilizationArray = utilizationSlices;
+
       const allFilteredTenants = filteredAssets.flatMap(asset => {
         const assetData = asset.toJSON ? asset.toJSON() : asset;
-        const assetUnits = allUnits.filter(u => {
-          return u.asset_id === assetData.id || u.asset?.id === assetData.id;
+        const assetUnits = allAssetUnits.filter((u) => {
+          const aid = u.asset?.id ?? u.asset_id;
+          return aid === assetData.id;
         });
         const assetUnitIds = assetUnits.map(u => u.id);
         return activeTenants.filter(t => {
@@ -881,18 +938,6 @@ class DashboardUsecase {
           });
         });
       });
-      
-      // Group by category and count jumlah tenant
-      allFilteredTenants.forEach(tenant => {
-        const categoryName = tenant.category?.name || 'Lainnya';
-        const currentCount = utilizationMap.get(categoryName) || 0;
-        utilizationMap.set(categoryName, currentCount + 1);
-      });
-      
-      // Convert to array format
-      const utilizationArray = Array.from(utilizationMap.entries())
-        .map(([category, value]) => ({ category, value }))
-        .sort((a, b) => b.value - a.value);
       
       // Calculate financial performance data per triwulan (Q1, Q2, Q3, Q4)
       const currentYear = new Date().getFullYear();

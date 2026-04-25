@@ -62,7 +62,7 @@ class TenantRepository {
   async findAll(filter = {}, ctx) {
     try {
       let whereQuery = {};
-      if (filter.name || filter.user_id || filter.status || filter.category_id || filter.category || filter.payment_status) {
+      if (filter.name || filter.user_id || filter.status || filter.category_id || filter.category || filter.payment_status || filter.asset_id) {
         whereQuery.where = {};
         if (filter.name && filter.name.trim()) {
           whereQuery.where.name = {
@@ -80,6 +80,33 @@ class TenantRepository {
 
         if (filter.payment_status) {
           whereQuery.where.payment_status = filter.payment_status;
+        }
+
+        // Filter tenant by asset via tenant_units -> units or tenant_assets
+        if (filter.asset_id) {
+          const [result] = await this.tenantModel.sequelize.query(
+            `
+            SELECT DISTINCT tenant_id
+            FROM (
+              SELECT tu.tenant_id
+              FROM tenant_units tu
+              INNER JOIN units u ON u.id = tu.unit_id
+              WHERE u.asset_id = :assetId
+              UNION
+              SELECT ta.tenant_id
+              FROM tenant_assets ta
+              WHERE ta.asset_id = :assetId
+            ) filtered_tenants
+            `,
+            {
+              replacements: { assetId: filter.asset_id },
+            }
+          );
+
+          const tenantIds = Array.isArray(result) ? result.map((row) => row.tenant_id) : [];
+          whereQuery.where.id = {
+            [Op.in]: tenantIds.length > 0 ? tenantIds : ['00000000-0000-0000-0000-000000000000'],
+          };
         }
 
         // Support both 'category' and 'category_id' filter parameters

@@ -16,9 +16,9 @@ function InitUnitRouter(UnitUsecase) {
       body('description').optional().isString(),
       body('size').isFloat().notEmpty(),
       body('building_area').isFloat().notEmpty(),
-      body('electrical_power').notEmpty().isNumeric(),
+      body('electrical_power').optional().isNumeric(),
       body('electrical_unit').optional().isString(),
-      body('is_toilet_exist').notEmpty().isBoolean(),
+      body('is_toilet_exist').optional().isBoolean(),
       body('photos').isArray().optional(),
     ],
     async (req, res) => {

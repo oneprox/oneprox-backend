@@ -66,6 +66,7 @@ class ComplaintReportUsecase {
         description: data.description,
         reporter_id: data.reporter_id,
         tenant_id: tenantId,
+        asset_id: data.asset_id || null,
         status,
         priority,
         created_by: ctx.userId,

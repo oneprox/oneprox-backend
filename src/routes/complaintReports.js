@@ -35,6 +35,7 @@ function InitComplaintReportRouter(complaintReportUsecase) {
     body('title').isString().notEmpty().withMessage('title is required'),
     body('description').isString().notEmpty().withMessage('description is required'),
     body('reporter_id').isUUID().notEmpty().withMessage('reporter_id must be a valid UUID'),
+    body('asset_id').optional().isUUID().withMessage('asset_id must be a valid UUID'),
     body('status').optional().custom((value) => {
       // Accept string status values or integer status values (0-3)
       if (typeof value === 'string') {

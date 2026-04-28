@@ -60,7 +60,7 @@ class AttendanceRepository {
     return await this.attendanceModel.update(data, options);
   }
 
-  async getUserAttendanceHistory(userId, limit = 10, dateFrom = null, dateTo = null) {
+  async getUserAttendanceHistory(userId, limit = 10, offset = 0, dateFrom = null, dateTo = null) {
     const { Op } = require('sequelize');
     const whereClause = { user_id: userId };
 
@@ -81,10 +81,11 @@ class AttendanceRepository {
       }
     }
 
-    return await this.attendanceModel.findAll({
+    return await this.attendanceModel.findAndCountAll({
       where: whereClause,
       order: [['created_at', 'DESC']],
-      limit
+      limit,
+      offset
     });
   }
 

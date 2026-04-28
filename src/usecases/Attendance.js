@@ -123,13 +123,24 @@ class AttendanceUseCase {
     }
   }
 
-  async getUserAttendanceHistory(userId, limit = 10, dateFrom = null, dateTo = null) {
+  async getUserAttendanceHistory(userId, limit = 10, offset = 0, dateFrom = null, dateTo = null) {
     try {
-      const history = await this.attendanceRepository.getUserAttendanceHistory(userId, limit, dateFrom, dateTo);
+      const historyResult = await this.attendanceRepository.getUserAttendanceHistory(
+        userId,
+        limit,
+        offset,
+        dateFrom,
+        dateTo
+      );
       
       return {
         success: true,
-        data: history
+        data: {
+          data: Array.isArray(historyResult?.rows) ? historyResult.rows : [],
+          total: Number.isFinite(historyResult?.count) ? historyResult.count : 0,
+          limit,
+          offset,
+        }
       };
     } catch (error) {
       console.error('Get user attendance history error:', error);

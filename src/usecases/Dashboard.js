@@ -811,21 +811,41 @@ class DashboardUsecase {
         tenantData.units = units;
         return tenantData;
       });
+
+      const filteredAssetIds = new Set(
+        filteredAssets.map((a) => {
+          const ad = a.toJSON ? a.toJSON() : a;
+          return ad.id;
+        })
+      );
+
+      const allAssetUnitsNested = await Promise.all(
+        [...filteredAssetIds].map((aid) =>
+          this.unitRepository.findAll(
+            { asset_id: aid, limit: 20000, is_deleted: false },
+            ctx
+          )
+        )
+      );
+      const allAssetUnits = [];
+      allAssetUnitsNested.forEach((res) => {
+        const list = res?.units ?? [];
+        allAssetUnits.push(...list);
+      });
       
       // Calculate overview data dari tenant aktif
       let totalLandArea = 0;
       let totalBuildingArea = 0;
-      let occupiedUnits = 0;
       let totalUnits = 0;
       let totalRevenue = 0;
       
       filteredAssets.forEach(asset => {
         const assetData = asset.toJSON ? asset.toJSON() : asset;
         
-        // Get units for this asset
-        const assetUnits = allUnits.filter(u => {
-          const unitData = u.toJSON ? u.toJSON() : u;
-          return unitData.asset_id === assetData.id || unitData.asset?.id === assetData.id;
+        // Get units for this asset (semua unit di aset, termasuk yang belum berpenghuni)
+        const assetUnits = allAssetUnits.filter((u) => {
+          const aid = u.asset?.id ?? u.asset_id;
+          return aid === assetData.id;
         });
         totalUnits += assetUnits.length;
         
@@ -844,8 +864,6 @@ class DashboardUsecase {
           });
         });
         
-        occupiedUnits += assetTenants.length;
-        
         // Calculate land area dan building area dari tenant aktif
         assetTenants.forEach(tenant => {
           const tenantLandArea = parseFloat(tenant.land_area) || 0;
@@ -860,16 +878,55 @@ class DashboardUsecase {
           totalRevenue += rentPrice;
         });
       });
-      
+
+      const unitsInScope = new Set();
+      allAssetUnits.forEach((u) => {
+        if (!u || u.id == null) return;
+        const aid = u.asset?.id ?? u.asset_id;
+        if (aid != null && filteredAssetIds.has(aid)) {
+          unitsInScope.add(u.id);
+        }
+      });
+
+      // Satu unit dihitung sekali; kategori = sektor tenant pertama yang mengisi unit
+      const unitIdToCategory = new Map();
+      activeTenants.forEach((tenant) => {
+        const categoryName = tenant.category?.name || 'Lainnya';
+        if (!tenant.units || !Array.isArray(tenant.units)) return;
+        tenant.units.forEach((tu) => {
+          const unitId = tu.id;
+          if (!unitId || !unitsInScope.has(unitId)) return;
+          if (!unitIdToCategory.has(unitId)) {
+            unitIdToCategory.set(unitId, categoryName);
+          }
+        });
+      });
+
+      const occupiedUnits = unitIdToCategory.size;
       const occupancy = totalUnits > 0 ? (occupiedUnits / totalUnits) * 100 : 0;
       const averageRate = totalBuildingArea > 0 ? totalRevenue / totalBuildingArea : 0;
-      
-      // Calculate utilization data berdasarkan jumlah tenant per kategori
+
       const utilizationMap = new Map();
+      for (const cat of unitIdToCategory.values()) {
+        utilizationMap.set(cat, (utilizationMap.get(cat) || 0) + 1);
+      }
+
+      const availableUnits = Math.max(0, totalUnits - occupiedUnits);
+      const utilizationSlices = Array.from(utilizationMap.entries())
+        .map(([category, value]) => ({ category, value }))
+        .sort((a, b) => b.value - a.value);
+
+      if (availableUnits > 0) {
+        utilizationSlices.push({ category: 'Tersedia', value: availableUnits });
+      }
+
+      const utilizationArray = utilizationSlices;
+
       const allFilteredTenants = filteredAssets.flatMap(asset => {
         const assetData = asset.toJSON ? asset.toJSON() : asset;
-        const assetUnits = allUnits.filter(u => {
-          return u.asset_id === assetData.id || u.asset?.id === assetData.id;
+        const assetUnits = allAssetUnits.filter((u) => {
+          const aid = u.asset?.id ?? u.asset_id;
+          return aid === assetData.id;
         });
         const assetUnitIds = assetUnits.map(u => u.id);
         return activeTenants.filter(t => {
@@ -881,18 +938,6 @@ class DashboardUsecase {
           });
         });
       });
-      
-      // Group by category and count jumlah tenant
-      allFilteredTenants.forEach(tenant => {
-        const categoryName = tenant.category?.name || 'Lainnya';
-        const currentCount = utilizationMap.get(categoryName) || 0;
-        utilizationMap.set(categoryName, currentCount + 1);
-      });
-      
-      // Convert to array format
-      const utilizationArray = Array.from(utilizationMap.entries())
-        .map(([category, value]) => ({ category, value }))
-        .sort((a, b) => b.value - a.value);
       
       // Calculate financial performance data per triwulan (Q1, Q2, Q3, Q4)
       const currentYear = new Date().getFullYear();
@@ -1004,12 +1049,10 @@ class DashboardUsecase {
           
           legalArray.forEach((legal) => {
             const legalData = legal.toJSON ? legal.toJSON() : legal;
-            if (!legalData.due_date || legalData.status === 'selesai') return;
+            if (!legalData.due_date) return;
             
             const dueDate = new Date(legalData.due_date);
             const dueDay = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
-            const legalRowStatus = dueDay < startOfToday ? 'Overdue' : 'On Process';
-            
             const tenantUnit = tenantUnitsForLegal[0];
             const asset = tenantUnit?.asset || (tenantUnit?.asset_id ? filteredAssets.find(a => {
               const assetData = a.toJSON ? a.toJSON() : a;
@@ -1038,7 +1081,7 @@ class DashboardUsecase {
               progress: 0,
               dokumen: legalData.keterangan || legalData.doc_type || '-',
               dokumenUrl: legalData.document_url || null,
-              status: legalRowStatus,
+              status: legalData.status || '',
               tipe: 'legal'
             });
           });
@@ -1168,6 +1211,12 @@ class DashboardUsecase {
           
           const payments = await this.tenantPaymentLogRepository.findByTenantId(tenantData.id, { limit: 1000 }, ctx);
           const paymentArray = Array.isArray(payments) ? payments : (payments?.rows || payments?.data || []);
+          const tenantRentPrice = parseFloat(tenantData.rent_price) || 0;
+          const totalAllPayments = paymentArray.reduce((sum, payment) => {
+            const paymentData = payment.toJSON ? payment.toJSON() : payment;
+            return sum + (parseFloat(paymentData.paid_amount) || 0);
+          }, 0);
+          const remainingRentValue = Math.max(0, tenantRentPrice - totalAllPayments);
           
           paymentArray.forEach((payment) => {
             const paymentData = payment.toJSON ? payment.toJSON() : payment;
@@ -1223,6 +1272,7 @@ class DashboardUsecase {
               deskripsi: deskripsi,
               nomorInvoice: `INV-${paymentData.id}`,
               nilaiInvoice: parseFloat(paymentData.amount) || parseFloat(paymentData.billing_amount) || 0,
+              sisaNilai: remainingRentValue,
               tanggalInvoice: paymentData.created_at ? new Date(paymentData.created_at).toLocaleDateString('id-ID') : '-',
               status: status,
               aging: aging > 0 ? aging : 0,
@@ -1291,8 +1341,17 @@ class DashboardUsecase {
         ),
       ]);
 
+      const routineOnlyTasks = (Array.isArray(routineTasks) ? routineTasks : []).filter((userTask) => {
+        if (!userTask) return false;
+        // Keep only routine user_task and routine task definition.
+        // This guards against any mixed payload from findByUserId.
+        const isRoutineUserTask = userTask.is_routine !== false;
+        const isRoutineTaskType = userTask.task?.is_routine !== false;
+        return isRoutineUserTask && isRoutineTaskType;
+      });
+
       return {
-        routine_tasks: Array.isArray(routineTasks) ? routineTasks : [],
+        routine_tasks: routineOnlyTasks,
         non_routine_tasks: Array.isArray(nonRoutineResult?.rows) ? nonRoutineResult.rows : [],
         non_routine_total: nonRoutineResult?.total || 0,
       };

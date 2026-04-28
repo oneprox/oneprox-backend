@@ -1,12 +1,14 @@
 const { Op } = require('sequelize');
 
 class ComplaintReportRepository {
-  constructor(complaintReportModel, userModel, tenantModel, complaintReportEvidenceModel, complaintReportLogModel) {
+  constructor(complaintReportModel, userModel, tenantModel, complaintReportEvidenceModel, complaintReportLogModel, assetModel = null, roleModel = null) {
     this.complaintReportModel = complaintReportModel;
     this.userModel = userModel;
     this.tenantModel = tenantModel;
     this.complaintReportEvidenceModel = complaintReportEvidenceModel;
     this.complaintReportLogModel = complaintReportLogModel;
+    this.assetModel = assetModel;
+    this.roleModel = roleModel;
   }
 
   async create(data, ctx = {}, tx = null) {
@@ -18,6 +20,7 @@ class ComplaintReportRepository {
         description: data.description,
         reporter_id: data.reporter_id,
         tenant_id: data.tenant_id || null,
+        asset_id: data.asset_id || null,
         status: data.status !== undefined ? data.status : 0,
         priority: data.priority !== undefined ? data.priority : 1,
         created_by: data.created_by,
@@ -40,7 +43,13 @@ class ComplaintReportRepository {
           {
             model: this.userModel,
             as: 'reporter',
-            attributes: ['id', 'name', 'email']
+            attributes: ['id', 'name', 'email'],
+            include: this.roleModel ? [{
+              model: this.roleModel,
+              as: 'role',
+              attributes: ['id', 'name', 'level'],
+              required: false,
+            }] : []
           },
           {
             model: this.tenantModel,
@@ -48,6 +57,12 @@ class ComplaintReportRepository {
             attributes: ['id', 'name', 'code'],
             required: false
           },
+          ...(this.assetModel ? [{
+            model: this.assetModel,
+            as: 'asset',
+            attributes: ['id', 'name'],
+            required: false
+          }] : []),
           {
             model: this.userModel,
             as: 'createdBy',
@@ -118,7 +133,13 @@ class ComplaintReportRepository {
           {
             model: this.userModel,
             as: 'reporter',
-            attributes: ['id', 'name', 'email']
+            attributes: ['id', 'name', 'email'],
+            include: this.roleModel ? [{
+              model: this.roleModel,
+              as: 'role',
+              attributes: ['id', 'name', 'level'],
+              required: false,
+            }] : []
           },
           {
             model: this.tenantModel,
@@ -126,6 +147,12 @@ class ComplaintReportRepository {
             attributes: ['id', 'name', 'code'],
             required: false
           },
+          ...(this.assetModel ? [{
+            model: this.assetModel,
+            as: 'asset',
+            attributes: ['id', 'name'],
+            required: false
+          }] : []),
           {
             model: this.userModel,
             as: 'createdBy',

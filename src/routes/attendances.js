@@ -133,6 +133,7 @@ function InitAttendanceRouter(attendanceUsecase) {
     query('date_to').optional().isISO8601().withMessage('date_to must be a valid ISO 8601 date'),
     query('user_id').optional().isUUID().withMessage('user_id must be a valid UUID'),
     query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('limit must be between 1 and 100'),
+    query('offset').optional().isInt({ min: 0 }).withMessage('offset must be 0 or greater'),
   ], async (req, res) => {
     try {
       const errors = validationResult(req);
@@ -156,11 +157,12 @@ function InitAttendanceRouter(attendanceUsecase) {
       }
 
       const limit = parseInt(req.query.limit) || 10;
+      const offset = parseInt(req.query.offset) || 0;
       const date_from = req.query.date_from || null;
       const date_to = req.query.date_to || null;
 
-      req.log?.info({ user_id, limit, date_from, date_to, query_user_id: req.query.user_id }, 'route_get_user_history');
-      const result = await attendanceUsecase.getUserAttendanceHistory(user_id, limit, date_from, date_to);
+      req.log?.info({ user_id, limit, offset, date_from, date_to, query_user_id: req.query.user_id }, 'route_get_user_history');
+      const result = await attendanceUsecase.getUserAttendanceHistory(user_id, limit, offset, date_from, date_to);
       
       if (result.success) {
         res.status(200).json(result);

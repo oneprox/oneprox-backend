@@ -7,6 +7,28 @@ class SettingsUsecase {
     this.tenantLegalRepository = tenantLegalRepository;
   }
 
+  validateSpecialSettingValue(key, value) {
+    const normalizedKey = String(key || '').trim();
+    const maxByKey = {
+      task_generation_before_hours: 3,
+      task_generation_after_hours: 6,
+    };
+    if (!(normalizedKey in maxByKey)) return;
+
+    const n = Number(value);
+    if (!Number.isFinite(n)) {
+      throw new Error(`${normalizedKey} harus berupa angka jam`);
+    }
+    if (n < 0) {
+      throw new Error(`${normalizedKey} tidak boleh kurang dari 0`);
+    }
+    if (n > maxByKey[normalizedKey]) {
+      throw new Error(
+        `${normalizedKey} maksimal ${maxByKey[normalizedKey]} jam`
+      );
+    }
+  }
+
   async listAllSettings(ctx) {
     ctx.log?.info({}, 'usecase_list_all_settings');
     try {
@@ -46,15 +68,24 @@ class SettingsUsecase {
   async createSetting(data, ctx) {
     ctx.log?.info({ key: data.key }, 'usecase_create_setting');
     try {
+      const key = String(data.key || '').trim();
+      this.validateSpecialSettingValue(key, data.value);
+
       // Check if key already exists
-      const existing = await this.settingsRepository.findByKey(data.key, ctx);
+      const existing = await this.settingsRepository.findByKey(key, ctx);
       if (existing) {
+        if (
+          key === 'task_generation_before_hours' ||
+          key === 'task_generation_after_hours'
+        ) {
+          throw new Error(`Setting ${key} hanya boleh satu`);
+        }
         throw new Error('Setting dengan key tersebut sudah ada');
       }
 
       const result = await sequelize.transaction(async (t) => {
         const settingData = {
-          key: data.key,
+          key,
           value: data.value,
           description: data.description,
           created_by: ctx.userId,
@@ -93,6 +124,12 @@ class SettingsUsecase {
   async updateSetting(id, data, ctx) {
     ctx.log?.info({ id }, 'usecase_update_setting');
     try {
+      const existing = await this.settingsRepository.findById(id, ctx);
+      if (!existing) {
+        throw new Error('Setting tidak ditemukan');
+      }
+      this.validateSpecialSettingValue(existing.key, data.value);
+
       const result = await sequelize.transaction(async (t) => {
         const settingData = {
           value: data.value,
@@ -116,14 +153,17 @@ class SettingsUsecase {
   async updateSettingByKey(key, data, ctx) {
     ctx.log?.info({ key }, 'usecase_update_setting_by_key');
     try {
+      const normalizedKey = String(key || '').trim();
+      this.validateSpecialSettingValue(normalizedKey, data.value);
+
       const result = await sequelize.transaction(async (t) => {
         // Check if setting exists
-        let setting = await this.settingsRepository.findByKey(key, ctx);
+        let setting = await this.settingsRepository.findByKey(normalizedKey, ctx);
         
         if (!setting) {
           // Create new setting if not found (upsert behavior)
           const settingData = {
-            key: key,
+            key: normalizedKey,
             value: data.value,
             description: data.description,
             created_by: ctx.userId,
@@ -137,7 +177,7 @@ class SettingsUsecase {
             description: data.description,
             updated_by: ctx.userId,
           };
-          setting = await this.settingsRepository.updateByKey(key, settingData, ctx, t);
+          setting = await this.settingsRepository.updateByKey(normalizedKey, settingData, ctx, t);
         }
         
         return setting;

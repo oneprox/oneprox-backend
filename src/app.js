@@ -153,11 +153,20 @@ const taskLogRepository = new TaskLogRepository(modelTaskLog, User);
 const taskGroupRepository = new TaskGroupRepository(modelTaskGroup, modelTask, modelUserTask, modelTaskParent, User);
 const taskParentRepository = new TaskParentRepository(modelTaskParent);
 const scanInfoRepository = new ScanInfoRepository(modelScanInfo, User, Asset);
-const userTaskRepository = new UserTaskRepository(modelUserTask, User, modelTask, modelUserTaskEvidence, modelTaskSchedule, modelTaskGroup, modelTaskParent);
+const settingsRepository = new SettingsRepository(Settings);
+const userTaskRepository = new UserTaskRepository(
+  modelUserTask,
+  User,
+  modelTask,
+  modelUserTaskEvidence,
+  modelTaskSchedule,
+  modelTaskGroup,
+  modelTaskParent,
+  settingsRepository
+);
 const userTaskEvidenceRepository = new UserTaskEvidenceRepository(modelUserTaskEvidence, modelUserTask);
 const tenantPaymentLogRepository = new TenantPaymentLogRepository(modelTenantPaymentLog, Tenant, User);
 const tenantLegalRepository = new TenantLegalRepository(TenantLegal, Tenant, User);
-const settingsRepository = new SettingsRepository(Settings);
 
 // Setup model associations
 const models = {

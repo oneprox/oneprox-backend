@@ -3,7 +3,7 @@ const moment = require("moment-timezone");
 const { UserTaskStatusIntToStr, UserTaskStatusStrToInt } = require("../models/UserTask");
 
 class UserTaskRepository {
-  constructor(userTaskModel, userModel, taskModel, userTaskEvidenceModel, taskScheduleModel, taskGroupModel, taskParentModel) {
+  constructor(userTaskModel, userModel, taskModel, userTaskEvidenceModel, taskScheduleModel, taskGroupModel, taskParentModel, settingsRepository = null) {
     this.userTaskModel = userTaskModel;
     this.userModel = userModel;
     this.taskModel = taskModel;
@@ -11,6 +11,7 @@ class UserTaskRepository {
     this.taskScheduleModel = taskScheduleModel;
     this.taskGroupModel = taskGroupModel;
     this.taskParentModel = taskParentModel;
+    this.settingsRepository = settingsRepository;
   }
 
   async create(data, ctx = {}, tx = null) {
@@ -856,8 +857,31 @@ class UserTaskRepository {
           transaction: t
         });
 
-        // Get time window from environment variable (default: 180 minutes = 3 hours)
-        const timeWindowMinutes = parseInt(process.env.TASK_GENERATION_TIME_WINDOW_MINUTES || '180', 10);
+        // Time window config:
+        // X jam sebelum start_time dan Y jam sesudah start_time.
+        // Sumber utama: settings table (keys below), fallback ke env lama.
+        const getSettingHours = async (key) => {
+          if (!this.settingsRepository) return null;
+          const setting = await this.settingsRepository.findByKey(key, ctx);
+          if (!setting || setting.value == null) return null;
+          const parsed = Number(setting.value);
+          return Number.isFinite(parsed) ? parsed : null;
+        };
+        const legacyWindowMinutes = parseInt(process.env.TASK_GENERATION_TIME_WINDOW_MINUTES || '180', 10);
+        const beforeSettingHours = await getSettingHours('task_generation_before_hours');
+        const afterSettingHours = await getSettingHours('task_generation_after_hours');
+        const beforeEnvHours = Number(process.env.TASK_GENERATION_BEFORE_HOURS);
+        const afterEnvHours = Number(process.env.TASK_GENERATION_AFTER_HOURS);
+        const beforeWindowMinutes = Number.isFinite(beforeSettingHours)
+          ? Math.max(0, Math.floor(beforeSettingHours * 60))
+          : Number.isFinite(beforeEnvHours)
+            ? Math.max(0, Math.floor(beforeEnvHours * 60))
+            : legacyWindowMinutes;
+        const afterWindowMinutes = Number.isFinite(afterSettingHours)
+          ? Math.max(0, Math.floor(afterSettingHours * 60))
+          : Number.isFinite(afterEnvHours)
+            ? Math.max(0, Math.floor(afterEnvHours * 60))
+            : legacyWindowMinutes;
         
         // Filter task groups where current time is within the configured time window before OR after start_time
         // (default: 0-180 minutes before or after start_time)
@@ -892,10 +916,9 @@ class UserTaskRepository {
             timeDiffAfterMinutes = (24 * 60) - startMinutes + currentMinutes;
           }
 
-          // Check if current time is within the configured time window before OR after start_time
-          // This gives a configurable window for task generation both before and after shift start
-          const isWithinBeforeWindow = timeDiffBeforeMinutes >= 0 && timeDiffBeforeMinutes <= timeWindowMinutes;
-          const isWithinAfterWindow = timeDiffAfterMinutes >= 0 && timeDiffAfterMinutes <= timeWindowMinutes;
+          // Apply split windows: X before + Y after
+          const isWithinBeforeWindow = timeDiffBeforeMinutes >= 0 && timeDiffBeforeMinutes <= beforeWindowMinutes;
+          const isWithinAfterWindow = timeDiffAfterMinutes >= 0 && timeDiffAfterMinutes <= afterWindowMinutes;
           
           return isWithinBeforeWindow || isWithinAfterWindow;
         });

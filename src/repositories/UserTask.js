@@ -68,7 +68,7 @@ class UserTaskRepository {
           {
             model: this.userTaskEvidenceModel,
             as: 'evidences',
-            attributes: ['id', 'user_task_id', 'url', 'created_at']
+            attributes: ['id', 'user_task_id', 'url', 'type', 'created_at']
           }
         ]
       });
@@ -104,7 +104,7 @@ class UserTaskRepository {
           {
             model: this.userTaskEvidenceModel,
             as: 'evidences',
-            attributes: ['id', 'user_task_id', 'url', 'created_at']
+            attributes: ['id', 'user_task_id', 'url', 'type', 'created_at']
           }
         ]
       });
@@ -156,7 +156,7 @@ class UserTaskRepository {
           {
             model: this.userTaskEvidenceModel,
             as: 'evidences',
-            attributes: ['id', 'user_task_id', 'url', 'created_at']
+            attributes: ['id', 'user_task_id', 'url', 'type', 'created_at']
           }
         ],
         order: [['created_at', 'DESC']]
@@ -330,7 +330,7 @@ class UserTaskRepository {
           {
             model: this.userTaskEvidenceModel,
             as: 'evidences',
-            attributes: ['id', 'user_task_id', 'url', 'created_at']
+            attributes: ['id', 'user_task_id', 'url', 'type', 'created_at']
           }
         ]
       });
@@ -497,6 +497,7 @@ class UserTaskRepository {
         month_to = null,
         all_users = null,
         asset_id = null,
+        non_routine = null,
       } = queryParams;
 
       const Role = require('../models/Role');
@@ -511,6 +512,15 @@ class UserTaskRepository {
         all_users === 1 ||
         all_users === '1' ||
         all_users === 'true';
+      const hasNonRoutineFilter =
+        non_routine !== null &&
+        non_routine !== undefined &&
+        non_routine !== '';
+      const isNonRoutineOnly =
+        non_routine === true ||
+        non_routine === 1 ||
+        non_routine === '1' ||
+        non_routine === 'true';
 
       const parseRange = (fromKey, toKey) => {
         const from = moment.tz(fromKey, 'YYYY-MM-DD', timezone).startOf('day');
@@ -609,6 +619,9 @@ class UserTaskRepository {
           ],
         };
         if (!allUsers) whereClause.user_id = userId;
+        if (hasNonRoutineFilter) {
+          whereClause.is_routine = !isNonRoutineOnly;
+        }
 
         const taskIncludeWhere = {};
         if (asset_id) taskIncludeWhere.asset_id = asset_id;
@@ -738,7 +751,7 @@ class UserTaskRepository {
           {
             model: this.userTaskEvidenceModel,
             as: 'evidences',
-            attributes: ['id', 'user_task_id', 'url', 'created_at'],
+            attributes: ['id', 'user_task_id', 'url', 'type', 'created_at'],
           },
         ],
       });
@@ -880,7 +893,7 @@ class UserTaskRepository {
           {
             model: this.userTaskEvidenceModel,
             as: 'evidences',
-            attributes: ['id', 'user_task_id', 'url', 'created_at']
+            attributes: ['id', 'user_task_id', 'url', 'type', 'created_at']
           }
         ]
       });

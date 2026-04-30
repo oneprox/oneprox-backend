@@ -12,6 +12,7 @@ class UserTaskEvidenceRepository {
       const evidence = await this.userTaskEvidenceModel.create({
         user_task_id: data.user_task_id,
         url: data.url,
+        type: data.type || 'after',
       }, { transaction: tx });
       return evidence.toJSON();
     } catch (error) {

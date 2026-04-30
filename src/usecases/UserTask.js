@@ -208,6 +208,38 @@ class UserTaskUsecase {
     }
   }
 
+  async getDailyWorkStatus(userId, queryParams, ctx) {
+    try {
+      ctx.log?.info({ userId, queryParams }, 'UserTaskUsecase.getDailyWorkStatus');
+      const result = await this.userTaskRepository.findDailyStatusByUserId(userId, queryParams, ctx);
+      const transformTaskArray = (arr) => {
+        if (!Array.isArray(arr)) return [];
+        return arr.map((task) => {
+          if (task.evidences) task.evidences = transformEvidenceUrls(task.evidences);
+          if (task.sub_user_task && Array.isArray(task.sub_user_task)) {
+            task.sub_user_task = task.sub_user_task.map((subTask) => {
+              if (subTask.evidences) subTask.evidences = transformEvidenceUrls(subTask.evidences);
+              return subTask;
+            });
+          }
+          return task;
+        });
+      };
+
+      return {
+        ...result,
+        today_tasks: transformTaskArray(result.today_tasks),
+        month_tasks: transformTaskArray(result.month_tasks),
+      };
+    } catch (error) {
+      ctx.log?.error(
+        { userId, queryParams, error: error.message },
+        'UserTaskUsecase.getDailyWorkStatus_error'
+      );
+      throw error;
+    }
+  }
+
   async getUpcomingUserTasks(userId, ctx) {
     try {
       ctx.log?.info({ userId }, "UserTaskUsecase.getUpcomingUserTasks");

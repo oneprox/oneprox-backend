@@ -486,6 +486,173 @@ class UserTaskRepository {
     }
   }
 
+  async findDailyStatusByUserId(userId, queryParams = {}, ctx = {}) {
+    try {
+      ctx.log?.info({ userId, queryParams }, 'UserTaskRepository.findDailyStatusByUserId');
+      const {
+        limit = 10000,
+        offset = 0,
+        day_date = null,
+        month_from = null,
+        month_to = null,
+        all_users = null,
+        asset_id = null,
+      } = queryParams;
+
+      const Role = require('../models/Role');
+      const { Asset } = require('../models/Asset');
+      const TaskGroup = require('../models/TaskGroup');
+      const timezone = process.env.TASK_DEFAULT_TIMEZONE || 'Asia/Jakarta';
+      const dayKey = day_date || moment().tz(timezone).format('YYYY-MM-DD');
+      const monthFromKey = month_from || moment().tz(timezone).startOf('month').format('YYYY-MM-DD');
+      const monthToKey = month_to || moment().tz(timezone).endOf('month').format('YYYY-MM-DD');
+      const allUsers =
+        all_users === true ||
+        all_users === 1 ||
+        all_users === '1' ||
+        all_users === 'true';
+
+      const parseRange = (fromKey, toKey) => {
+        const from = moment.tz(fromKey, 'YYYY-MM-DD', timezone).startOf('day');
+        const to = moment.tz(toKey, 'YYYY-MM-DD', timezone).endOf('day');
+        if (!from.isValid() || !to.isValid()) {
+          throw new Error('Invalid daily status date range');
+        }
+        return { from: from.toDate(), to: to.toDate() };
+      };
+
+      const mapRowsToMainWithChildren = (rows) => {
+        const userTasksJson = rows.map((ut) => {
+          const j = ut.toJSON();
+          if (j.status !== undefined) j.status = UserTaskStatusIntToStr[j.status] || 'pending';
+          return j;
+        });
+
+        const mainTasks = [];
+        const childTasksMap = new Map();
+        const userTaskIdMap = new Map();
+
+        userTasksJson.forEach((userTask) => {
+          userTaskIdMap.set(userTask.id, userTask);
+          if (userTask.is_main_task) {
+            userTask.childTasks = [];
+            mainTasks.push(userTask);
+          } else if (userTask.parent_user_task_id) {
+            const parentId = userTask.parent_user_task_id;
+            if (!childTasksMap.has(parentId)) childTasksMap.set(parentId, []);
+            childTasksMap.get(parentId).push(userTask);
+          } else {
+            userTask.childTasks = [];
+            userTask.is_main_task = true;
+            mainTasks.push(userTask);
+          }
+        });
+
+        childTasksMap.forEach((children, parentId) => {
+          const parent = userTaskIdMap.get(parentId);
+          if (!parent) return;
+          if (!parent.childTasks) parent.childTasks = [];
+          const existingIds = new Set(parent.childTasks.map((ct) => ct.id));
+          children.forEach((c) => {
+            if (!existingIds.has(c.id)) parent.childTasks.push(c);
+          });
+        });
+
+        const result = mainTasks.map((mainTask) => ({
+          user_task_id: mainTask.id,
+          task_id: mainTask.task_id,
+          user_id: mainTask.user_id,
+          start_at: mainTask.start_at,
+          completed_at: mainTask.completed_at,
+          notes: mainTask.notes,
+          status: mainTask.status,
+          code: mainTask.code,
+          is_main_task: mainTask.is_main_task,
+          parent_user_task_id: mainTask.parent_user_task_id,
+          time: mainTask.time,
+          is_routine: mainTask.is_routine,
+          created_at: mainTask.created_at,
+          updated_at: mainTask.updated_at,
+          task: mainTask.task,
+          evidences: mainTask.evidences || [],
+          sub_user_task: (mainTask.childTasks || []).map((child) => ({
+            user_task_id: child.id,
+            task_id: child.task_id,
+            user_id: child.user_id,
+            start_at: child.start_at,
+            completed_at: child.completed_at,
+            notes: child.notes,
+            status: child.status,
+            code: child.code,
+            is_main_task: child.is_main_task,
+            parent_user_task_id: child.parent_user_task_id,
+            time: child.time,
+            is_routine: child.is_routine,
+            created_at: child.created_at,
+            updated_at: child.updated_at,
+            task: child.task,
+            evidences: child.evidences || [],
+            sub_user_task: [],
+          })),
+        }));
+        result.sort((a, b) => a.user_task_id - b.user_task_id);
+        return result;
+      };
+
+      const fetchByActivityRange = async (fromKey, toKey) => {
+        const { from, to } = parseRange(fromKey, toKey);
+        const whereClause = {
+          [Op.or]: [
+            { created_at: { [Op.between]: [from, to] } },
+            { start_at: { [Op.between]: [from, to] } },
+            { completed_at: { [Op.between]: [from, to] } },
+          ],
+        };
+        if (!allUsers) whereClause.user_id = userId;
+
+        const taskIncludeWhere = {};
+        if (asset_id) taskIncludeWhere.asset_id = asset_id;
+
+        const { rows } = await this.userTaskModel.findAndCountAll({
+          where: whereClause,
+          limit: parseInt(limit, 10),
+          offset: parseInt(offset, 10),
+          order: [['id', 'ASC']],
+          include: [
+            {
+              model: this.taskModel,
+              as: 'task',
+              required: Boolean(asset_id),
+              ...(Object.keys(taskIncludeWhere).length > 0 ? { where: taskIncludeWhere } : {}),
+              include: [
+                { model: Role, as: 'role', attributes: ['id', 'name', 'level'], required: false },
+                { model: Asset, as: 'asset', attributes: ['id', 'name', 'code'], required: false },
+                { model: TaskGroup, as: 'taskGroup', attributes: ['id', 'name'], required: false },
+              ],
+            },
+            { model: this.userTaskEvidenceModel, as: 'evidences', attributes: ['id', 'user_task_id', 'url', 'created_at'] },
+          ],
+        });
+
+        return mapRowsToMainWithChildren(rows);
+      };
+
+      const todayRows = await fetchByActivityRange(dayKey, dayKey);
+      const monthRows = await fetchByActivityRange(monthFromKey, monthToKey);
+
+      return {
+        day_date: dayKey,
+        month_from: monthFromKey,
+        month_to: monthToKey,
+        today_tasks: todayRows,
+        month_tasks: monthRows,
+      };
+    } catch (error) {
+      ctx.log?.error({ userId, queryParams, error }, 'UserTaskRepository.findDailyStatusByUserId_error');
+      throw error;
+    }
+  }
+
   /**
    * User tasks whose definition task is non-routine (is_routine = false).
    * Flat list; no batch grouping by code.

@@ -76,6 +76,40 @@ function InitUserTaskRouter(userTaskUsecase) {
     }
   }
 
+  async function getDailyWorkStatus(req, res) {
+    try {
+      req.log?.info({ query: req.query }, "UserTaskRouter.getDailyWorkStatus");
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res
+          .status(400)
+          .json(createResponse(null, "validation error", 400, errors.array()));
+      }
+
+      const allUsers =
+        req.query.all_users === '1' ||
+        req.query.all_users === 'true';
+      const userId = req.query.user_id || req.auth?.userId;
+      if (!allUsers && !userId) {
+        return res.status(401).json(
+          createResponse(null, "Unauthorized: User ID not found", 401)
+        );
+      }
+
+      const result = await userTaskUsecase.getDailyWorkStatus(userId || null, req.query, {
+        userId: req.auth?.userId,
+        log: req.log,
+      });
+
+      return res.status(200).json(createResponse(result, "success", 200));
+    } catch (error) {
+      req.log?.error({ error: error.message, stack: error.stack }, "UserTaskRouter.getDailyWorkStatus");
+      return res
+        .status(500)
+        .json(createResponse(null, error.message || "internal server error", 500));
+    }
+  }
+
   async function getUpcomingUserTasks(req, res) {
     try {
       req.log?.info({}, "UserTaskRouter.getUpcomingUserTasks");
@@ -223,6 +257,17 @@ function InitUserTaskRouter(userTaskUsecase) {
     query("date_from").optional().isISO8601({ strict: false }).withMessage("date_from must be a valid ISO 8601 date"),
     query("date_to").optional().isISO8601({ strict: false }).withMessage("date_to must be a valid ISO 8601 date"),
     query("period").optional().matches(/^\d{4}-\d{2}$/).withMessage("period must be YYYY-MM"),
+  ];
+
+  const getDailyWorkStatusParam = [
+    query("user_id").optional().isUUID().withMessage("user_id must be a valid UUID"),
+    query("all_users").optional().isIn(["0", "1", "true", "false"]).withMessage("all_users must be 0/1/true/false"),
+    query("asset_id").optional().isString().notEmpty().withMessage("asset_id must be a non-empty string"),
+    query("day_date").optional().matches(/^\d{4}-\d{2}-\d{2}$/).withMessage("day_date must be YYYY-MM-DD"),
+    query("month_from").optional().matches(/^\d{4}-\d{2}-\d{2}$/).withMessage("month_from must be YYYY-MM-DD"),
+    query("month_to").optional().matches(/^\d{4}-\d{2}-\d{2}$/).withMessage("month_to must be YYYY-MM-DD"),
+    query("limit").optional().isInt({ min: 1, max: 50000 }).withMessage("limit must be between 1 and 50000"),
+    query("offset").optional().isInt({ min: 0 }).withMessage("offset must be non-negative"),
   ];
 
   async function getNonRoutineUserTasks(req, res) {
@@ -373,6 +418,7 @@ function InitUserTaskRouter(userTaskUsecase) {
 
   router.post("/generate-upcoming", generateUpcomingUserTasks);
   router.get("/code/:code", getUserTaskByCodeParam, getUserTaskByCode);
+  router.get("/daily-status", getDailyWorkStatusParam, getDailyWorkStatus);
   router.get("/non-routine", getNonRoutineUserTasksParam, getNonRoutineUserTasks);
   router.get("/upcoming", getUpcomingUserTasks);
   router.get("/:id", getUserTaskByIdParam, getUserTaskById);

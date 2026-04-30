@@ -129,6 +129,7 @@ function InitComplaintReportRouter(complaintReportUsecase) {
     }).withMessage('priority must be one of: low, medium, high, urgent (or 0-3)'),
     query('reporter_id').optional().isUUID().withMessage('reporter_id must be a valid UUID'),
     query('tenant_id').optional().isUUID().withMessage('tenant_id must be a valid UUID'),
+    query('asset_id').optional().isUUID().withMessage('asset_id must be a valid UUID'),
     query('title').optional().isString(),
     query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('limit must be between 1 and 100'),
     query('offset').optional().isInt({ min: 0 }).withMessage('offset must be a non-negative integer'),
@@ -155,12 +156,14 @@ function InitComplaintReportRouter(complaintReportUsecase) {
       if (req.query.priority) filters.priority = req.query.priority;
       if (req.query.reporter_id) filters.reporter_id = req.query.reporter_id;
       if (req.query.tenant_id) filters.tenant_id = req.query.tenant_id;
+      if (req.query.asset_id) filters.asset_id = req.query.asset_id;
       if (req.query.title) filters.title = req.query.title;
       if (req.query.limit) filters.limit = parseInt(req.query.limit);
       if (req.query.offset) filters.offset = parseInt(req.query.offset);
 
       const result = await complaintReportUsecase.getAllComplaintReports(filters, {
         userId: req.auth?.userId,
+        roleName: req.auth?.roleName,
         log: req.log,
       });
 

@@ -121,6 +121,14 @@ class ComplaintReportRepository {
       if (filters.tenant_id) {
         whereClause.tenant_id = filters.tenant_id;
       }
+      if (filters.asset_id) {
+        whereClause.asset_id = filters.asset_id;
+      }
+      if (filters.asset_ids && Array.isArray(filters.asset_ids)) {
+        whereClause.asset_id = {
+          [Op.in]: filters.asset_ids
+        };
+      }
       if (filters.title) {
         whereClause.title = {
           [Op.iLike]: `%${filters.title}%`

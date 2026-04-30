@@ -9,12 +9,13 @@ const {
 const { transformEvidenceUrls, transformImageUrl } = require('../services/baseUrl');
 
 class ComplaintReportUsecase {
-  constructor(complaintReportRepository, userRepository, tenantRepository, complaintReportEvidenceRepository, complaintReportLogRepository) {
+  constructor(complaintReportRepository, userRepository, tenantRepository, complaintReportEvidenceRepository, complaintReportLogRepository, userAssetRepository) {
     this.complaintReportRepository = complaintReportRepository;
     this.userRepository = userRepository;
     this.tenantRepository = tenantRepository;
     this.complaintReportEvidenceRepository = complaintReportEvidenceRepository;
     this.complaintReportLogRepository = complaintReportLogRepository;
+    this.userAssetRepository = userAssetRepository;
   }
 
   async createComplaintReport(data, ctx) {
@@ -191,6 +192,32 @@ class ComplaintReportUsecase {
           }
         }
         // If it's already a number, use it as is
+      }
+
+      const roleName = String(ctx?.roleName || '').toLowerCase();
+      const isAdmin = roleName === 'admin' || roleName === 'super_admin';
+
+      // Restrict visible complaint reports to assets owned by logged-in non-admin user.
+      // If non-admin user doesn't own any asset, return empty data.
+      if (!isAdmin && ctx?.userId && this.userAssetRepository) {
+        const userAssets = await this.userAssetRepository.getByUserID(ctx.userId, ctx);
+        const ownedAssetIds = userAssets.map((ua) => ua.asset_id);
+
+        if (ownedAssetIds.length === 0) {
+          return {
+            complaintReports: [],
+            total: 0,
+          };
+        }
+
+        if (queryFilters.asset_id && !ownedAssetIds.includes(queryFilters.asset_id)) {
+          return {
+            complaintReports: [],
+            total: 0,
+          };
+        }
+
+        queryFilters.asset_ids = ownedAssetIds;
       }
 
       const result = await this.complaintReportRepository.findAll(queryFilters, ctx);

@@ -240,7 +240,14 @@ const taskUsecase = new taskUc(taskRepository, taskScheduleRepository, taskLogRe
 const taskGroupUsecase = new taskGroupUc(taskGroupRepository);
 const userTaskUsecase = new userTaskUc(userTaskRepository, taskRepository, taskScheduleRepository, userTaskEvidenceRepository);
 const scanInfoUsecase = new scanInfoUc(scanInfoRepository);
-const complaintReportUsecase = new complaintReportUc(complaintReportRepository, userRepository, tenantRepository, complaintReportEvidenceRepository, complaintReportLogRepository);
+const complaintReportUsecase = new complaintReportUc(
+  complaintReportRepository,
+  userRepository,
+  tenantRepository,
+  complaintReportEvidenceRepository,
+  complaintReportLogRepository,
+  userAssetRepository
+);
 const attendanceRepository = new AttendanceRepository();
 const attendanceUsecase = new attendanceUc(attendanceRepository);
 const tenantPaymentLogUsecase = new tenantPaymentLogUc(tenantPaymentLogRepository, tenantRepository);

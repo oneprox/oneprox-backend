@@ -95,9 +95,9 @@ TenantPaymentLog.init({
     comment: 'Rate (default 0.01)'
   },
   last_charge_date: {
-    type: DataTypes.FLOAT,
+    type: DataTypes.DATE,
     allowNull: true,
-    comment: 'Last charge (nominal)'
+    comment: 'Last charge date'
   },
   created_by: {
     type: DataTypes.UUID,

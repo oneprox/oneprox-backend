@@ -17,6 +17,11 @@ UserTaskEvidence.init({
     type: DataTypes.STRING,
     allowNull: false,
   },
+  type: {
+    type: DataTypes.ENUM('before', 'after'),
+    allowNull: false,
+    defaultValue: 'after',
+  },
   created_at: {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW,
@@ -28,6 +33,7 @@ UserTaskEvidence.init({
   timestamps: false,
   indexes: [
     { fields: ['user_task_id'] },
+    { fields: ['type'] },
     { fields: ['created_at'] },
   ],
 });

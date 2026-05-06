@@ -337,6 +337,7 @@ class UserTaskUsecase {
               await this.userTaskEvidenceRepository.create({
                 user_task_id: userTaskId,
                 url: evidence.url,
+                type: evidence.type || 'after',
               }, ctx, tx);
             }
           }

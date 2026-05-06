@@ -184,6 +184,7 @@ function InitUserTaskRouter(userTaskUsecase) {
           const file = req.files.file_before[0];
           evidences.push({
             url: `${host}/uploads/user-task-evidence/${file.filename}`,
+            type: 'before',
           });
         }
         
@@ -192,6 +193,7 @@ function InitUserTaskRouter(userTaskUsecase) {
           const file = req.files.file_after[0];
           evidences.push({
             url: `${host}/uploads/user-task-evidence/${file.filename}`,
+            type: 'after',
           });
         }
         
@@ -200,6 +202,7 @@ function InitUserTaskRouter(userTaskUsecase) {
           const file = req.files.file_scan[0];
           evidences.push({
             url: `${host}/uploads/user-task-evidence/${file.filename}`,
+            type: 'after',
           });
         }
       }
@@ -208,6 +211,7 @@ function InitUserTaskRouter(userTaskUsecase) {
       if (req.body.remark && req.body.remark.trim()) {
         evidences.push({
           url: `text:${req.body.remark}`,
+          type: 'after',
         });
       }
       
@@ -266,6 +270,7 @@ function InitUserTaskRouter(userTaskUsecase) {
     query("day_date").optional().matches(/^\d{4}-\d{2}-\d{2}$/).withMessage("day_date must be YYYY-MM-DD"),
     query("month_from").optional().matches(/^\d{4}-\d{2}-\d{2}$/).withMessage("month_from must be YYYY-MM-DD"),
     query("month_to").optional().matches(/^\d{4}-\d{2}-\d{2}$/).withMessage("month_to must be YYYY-MM-DD"),
+    query("non_routine").optional().isIn(["0", "1", "true", "false"]).withMessage("non_routine must be 0/1/true/false"),
     query("limit").optional().isInt({ min: 1, max: 50000 }).withMessage("limit must be between 1 and 50000"),
     query("offset").optional().isInt({ min: 0 }).withMessage("offset must be non-negative"),
   ];

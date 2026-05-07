@@ -21,16 +21,29 @@ class TenantPaymentLogUsecase {
       // Create payment log
       // billing_period, billing_amount, and payment_deadline are mandatory
       // payment_date, paid_amount can be null initially
-      // If payment_date is provided, status should be "paid" and paid_amount should equal amount
+      // Jika payment_date / paid_amount diisi saat create, status otomatis paid.
       const hasPaymentDate = data.payment_date != null;
+      const paidAmount =
+        data.paid_amount !== undefined && data.paid_amount !== null
+          ? Number(data.paid_amount)
+          : null;
+      const isPaidByAmount = paidAmount !== null && !Number.isNaN(paidAmount) && paidAmount > 0;
+      const shouldBePaid = hasPaymentDate || isPaidByAmount;
+
+      // Backward-compatible: jika tidak ada paid_amount tapi ada payment_date, gunakan amount sebagai paid_amount.
+      const paidAmountToSave =
+        paidAmount !== null && !Number.isNaN(paidAmount)
+          ? paidAmount
+          : (hasPaymentDate ? (data.amount ?? null) : null);
+
       const paymentLog = await this.tenantPaymentLogRepository.create({
         tenant_id: data.tenant_id,
         amount: data.amount || null,
-        paid_amount: hasPaymentDate ? data.amount : null, // Set to amount if payment_date is provided
+        paid_amount: paidAmountToSave,
         payment_date: data.payment_date || null, // Use provided payment_date or null
         payment_deadline: data.payment_deadline, // Payment deadline (mandatory)
         payment_method: data.payment_method || null,
-        status: hasPaymentDate ? 1 : 0, // 1 = paid if payment_date is provided, 0 = unpaid otherwise
+        status: shouldBePaid ? 1 : 0, // 1 = paid, 0 = unpaid
         notes: data.notes || null,
         billing_type: data.billing_type || null,
         billing_period: data.billing_period, // Mandatory

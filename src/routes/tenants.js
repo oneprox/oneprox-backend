@@ -216,6 +216,7 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
   router.post('/:id/payments', [
     param('id').isUUID().withMessage('ID must be a valid UUID'),
     body('amount').optional().isFloat({ min: 0 }).withMessage('amount must be a positive number'),
+    body('paid_amount').optional().isFloat({ min: 0 }).withMessage('paid_amount must be a valid number (>= 0)'),
     body('payment_date').optional().isISO8601().withMessage('payment_date must be a valid date'),
     body('payment_deadline').notEmpty().isISO8601().withMessage('payment_deadline is required and must be a valid date'),
     body('payment_method').optional().isIn(['cash', 'bank_transfer', 'qris','other']).withMessage('payment_method must be one of: cash, bank_transfer, qris, other'),
@@ -223,8 +224,16 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
     body('billing_type').optional().isString().withMessage('billing_type must be a string'),
     body('billing_period').notEmpty().isString().withMessage('billing_period is required and must be a string'),
     body('billing_amount').notEmpty().isFloat({ min: 0 }).withMessage('billing_amount is required and must be a positive number'),
-    body('outstanding').optional().isFloat({ min: 0 }).withMessage('outstanding must be a positive number'),
-    body('overdue').optional().isFloat({ min: 0 }).withMessage('overdue must be a positive number'),
+    body('outstanding')
+      .customSanitizer(v => (v === '' ? null : v))
+      .optional({ nullable: true })
+      .isFloat({ min: 0 })
+      .withMessage('outstanding must be a positive number'),
+    body('overdue')
+      .customSanitizer(v => (v === '' ? null : v))
+      .optional({ nullable: true })
+      .isFloat({ min: 0 })
+      .withMessage('overdue must be a positive number'),
     body('rate').optional().isFloat({ min: 0 }).withMessage('rate must be a positive number'),
     body('last_charge_date').optional().isISO8601().withMessage('last_charge_date must be a valid date'),
   ], async (req, res) => {
@@ -238,6 +247,7 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
       const paymentLog = await TenantPaymentLogUsecase.createPaymentLog({
         tenant_id: req.params.id,
         amount: req.body.amount,
+        paid_amount: req.body.paid_amount,
         payment_date: req.body.payment_date,
         payment_deadline: req.body.payment_deadline,
         payment_method: req.body.payment_method,
@@ -315,8 +325,16 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
     body('billing_type').optional().isString().withMessage('billing_type must be a string'),
     body('billing_period').optional().isString().withMessage('billing_period must be a string'),
     body('billing_amount').optional().isFloat({ min: 0 }).withMessage('billing_amount must be a positive number'),
-    body('outstanding').optional().isFloat({ min: 0 }).withMessage('outstanding must be a positive number'),
-    body('overdue').optional().isFloat({ min: 0 }).withMessage('overdue must be a positive number'),
+    body('outstanding')
+      .customSanitizer(v => (v === '' ? null : v))
+      .optional({ nullable: true })
+      .isFloat({ min: 0 })
+      .withMessage('outstanding must be a positive number'),
+    body('overdue')
+      .customSanitizer(v => (v === '' ? null : v))
+      .optional({ nullable: true })
+      .isFloat({ min: 0 })
+      .withMessage('overdue must be a positive number'),
     body('rate').optional().isFloat({ min: 0 }).withMessage('rate must be a positive number'),
     body('last_charge_date').optional().isISO8601().withMessage('last_charge_date must be a valid date'),
   ], async (req, res) => {

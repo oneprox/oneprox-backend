@@ -21,6 +21,7 @@ function InitUserTaskRouter(userTaskUsecase) {
       const result = await userTaskUsecase.generateUpcomingUserTasks({
         userId: req.auth?.userId,
         log: req.log,
+        body: req.body || {},
       });
       
       return res.status(201).json(createResponse(result, "User tasks generated successfully", 201));
@@ -32,6 +33,20 @@ function InitUserTaskRouter(userTaskUsecase) {
         return res
           .status(409)
           .json(createResponse(null, error.message || "User tasks have already been generated for this task group time range", 409));
+      }
+
+      if (error.statusCode === 400) {
+        return res.status(400).json(createResponse(null, error.message || "Bad request", 400));
+      }
+
+      if (error.statusCode === 403) {
+        return res.status(403).json(createResponse(null, error.message || "Forbidden", 403));
+      }
+
+      if (error.statusCode === 404) {
+        return res.status(404).json(
+          createResponse(null, error.message || "Not found", 404)
+        );
       }
       
       return res
@@ -419,9 +434,15 @@ function InitUserTaskRouter(userTaskUsecase) {
     param("id").isInt().notEmpty().withMessage("id must be an integer"),
   ];
 
+  const generateUpcomingUserTasksParam = [
+    body("asset_id").optional().isUUID().withMessage("asset_id must be a valid UUID"),
+    body("asset_ids").optional().isArray().withMessage("asset_ids must be an array"),
+    body("asset_ids.*").optional().isUUID().withMessage("each asset_ids value must be a valid UUID"),
+  ];
+
   router.use(authMiddleware, ensureRole);
 
-  router.post("/generate-upcoming", generateUpcomingUserTasks);
+  router.post("/generate-upcoming", generateUpcomingUserTasksParam, generateUpcomingUserTasks);
   router.get("/code/:code", getUserTaskByCodeParam, getUserTaskByCode);
   router.get("/daily-status", getDailyWorkStatusParam, getDailyWorkStatus);
   router.get("/non-routine", getNonRoutineUserTasksParam, getNonRoutineUserTasks);

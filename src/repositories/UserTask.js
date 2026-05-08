@@ -996,9 +996,9 @@ class UserTaskRepository {
     }
   }
 
-  async generateUpcomingUserTasks(userId, hoursAhead = 12, ctx = {}) {
+  async generateUpcomingUserTasks(userId, hoursAhead = 12, ctx = {}, options = {}) {
     try {
-      ctx.log?.info({ userId, hoursAhead }, 'UserTaskRepository.generateUpcomingUserTasks');
+      ctx.log?.info({ userId, hoursAhead, options }, 'UserTaskRepository.generateUpcomingUserTasks');
       
       const sequelize = require('../models/sequelize');
       const result = await sequelize.transaction(async (t) => {
@@ -1014,7 +1014,15 @@ class UserTaskRepository {
         }
         
         const userRoleId = user.role_id;
-        ctx.log?.info({ userId, userRoleId }, 'User role_id retrieved');
+        const assetIds = Array.isArray(options.assetIds)
+          ? [...new Set(options.assetIds.map((id) => String(id).trim()).filter(Boolean))]
+          : [];
+        if (assetIds.length === 0) {
+          ctx.log?.warn({ userId }, 'generateUpcomingUserTasks: no assetIds in options');
+          return { created: 0, userTasks: [] };
+        }
+        const assetWhere = { asset_id: { [Op.in]: assetIds } };
+        ctx.log?.info({ userId, userRoleId, assetIds }, 'User role_id and asset filter for generation');
         
         // Get current day and time in Asia/Jakarta timezone
         const now = moment().tz('Asia/Jakarta');
@@ -1109,10 +1117,9 @@ class UserTaskRepository {
         // If no matching task groups found, don't generate any tasks
         if (matchingTaskGroupIds.length === 0) {
           ctx.log?.info({ currentTime }, 'No matching task groups found for current time');
-          return {
-            created: 0,
-            userTasks: []
-          };
+          const err = new Error('Tidak ada task yang aktif di jam sekarang atau kamu sudah terlambat');
+          err.statusCode = 404;
+          throw err;
         }
 
         // Helper function to parse time
@@ -1127,7 +1134,8 @@ class UserTaskRepository {
         const tasksToCheck = await this.taskModel.findAll({
           where: {
             task_group_id: { [Op.in]: matchingTaskGroupIds },
-            role_id: userRoleId // Filter by user's role_id
+            role_id: userRoleId,
+            ...assetWhere,
           },
           attributes: ['id'],
           transaction: t
@@ -1187,10 +1195,11 @@ class UserTaskRepository {
           }
         }
         
-        // Build where clause for tasks - only get tasks that belong to matching task groups AND match user's role
+        // Build where clause for tasks - matching task groups, role, and asset(s) user is allowed to work on
         const taskWhereClause = {
           task_group_id: { [Op.in]: matchingTaskGroupIds },
-          role_id: userRoleId // Filter by user's role_id
+          role_id: userRoleId,
+          ...assetWhere,
         };
         
         ctx.log?.info({ 
@@ -1305,8 +1314,8 @@ class UserTaskRepository {
             childTasks = await this.taskModel.findAll({
               where: {
                 id: { [Op.in]: childTaskIds },
-                role_id: userRoleId // Filter child tasks by user's role_id as well
-                // Remove task_group_id filter - child tasks should be included if their parent is included
+                role_id: userRoleId,
+                ...assetWhere,
               },
               include: [
                 {
@@ -1470,7 +1479,8 @@ class UserTaskRepository {
                 
                 // If child task not found in allTasks, fetch it directly
                 if (!childTask && this.taskModel) {
-                  childTask = await this.taskModel.findByPk(childTaskId, {
+                  childTask = await this.taskModel.findOne({
+                    where: { id: childTaskId, ...assetWhere },
                     include: [
                       {
                         model: this.taskScheduleModel,
@@ -1571,9 +1581,10 @@ class UserTaskRepository {
             for (const childTaskId of childTaskIds) {
               let childTask = allTasks.find(t => t.id === childTaskId);
               
-              // If child task not found in allTasks, fetch it directly
+              // If child task not found in allTasks, fetch it directly (respect asset filter)
               if (!childTask && this.taskModel) {
-                childTask = await this.taskModel.findByPk(childTaskId, {
+                childTask = await this.taskModel.findOne({
+                  where: { id: childTaskId, ...assetWhere },
                   include: [
                     {
                       model: this.taskScheduleModel,
@@ -1806,6 +1817,12 @@ class UserTaskRepository {
         
         // Calculate total created (main tasks + child tasks)
         const totalCreated = createdUserTasks.length;
+
+        if (totalCreated === 0) {
+          const err = new Error('Tidak ada task yang aktif di jam sekarang atau kamu sudah terlambat');
+          err.statusCode = 404;
+          throw err;
+        }
         
         return {
           created: totalCreated,

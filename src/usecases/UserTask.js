@@ -86,18 +86,69 @@ function nonRoutineIdempotencyCode(taskId, periodYm, slotIndex) {
 }
 
 class UserTaskUsecase {
-  constructor(userTaskRepository, taskRepository, taskScheduleRepository, userTaskEvidenceRepository) {
+  constructor(
+    userTaskRepository,
+    taskRepository,
+    taskScheduleRepository,
+    userTaskEvidenceRepository,
+    userAssetRepository
+  ) {
     this.userTaskRepository = userTaskRepository;
     this.taskRepository = taskRepository;
     this.taskScheduleRepository = taskScheduleRepository;
     this.userTaskEvidenceRepository = userTaskEvidenceRepository;
+    this.userAssetRepository = userAssetRepository;
   }
 
   async generateUpcomingUserTasks(ctx) {
     try {
       ctx.log?.info({}, "UserTaskUsecase.generateUpcomingUserTasks");
-      
-      const result = await this.userTaskRepository.generateUpcomingUserTasks(ctx.userId, 12, ctx);
+
+      const body = ctx.body && typeof ctx.body === "object" ? ctx.body : {};
+      const requested = [];
+      if (body.asset_id != null && String(body.asset_id).trim() !== "") {
+        const id = String(body.asset_id).trim();
+        if (isUuid(id)) requested.push(id);
+      }
+      if (Array.isArray(body.asset_ids)) {
+        for (const x of body.asset_ids) {
+          if (x == null) continue;
+          const id = String(x).trim();
+          if (id && isUuid(id)) requested.push(id);
+        }
+      }
+      const uniqueRequested = [...new Set(requested)];
+
+      const userAssets = await this.userAssetRepository.getByUserID(ctx.userId, ctx);
+      const ownedIds = [...new Set(userAssets.map((ua) => String(ua.asset_id)))];
+
+      let assetIds;
+      if (uniqueRequested.length > 0) {
+        const notOwned = uniqueRequested.filter((id) => !ownedIds.includes(id));
+        if (notOwned.length > 0) {
+          const err = new Error("One or more assets are not assigned to this user");
+          err.statusCode = 403;
+          throw err;
+        }
+        assetIds = uniqueRequested;
+      } else {
+        assetIds = ownedIds;
+      }
+
+      if (assetIds.length === 0) {
+        const err = new Error(
+          "User has no assigned assets. Assign an asset to the user, or pass asset_id for an allowed asset."
+        );
+        err.statusCode = 400;
+        throw err;
+      }
+
+      const result = await this.userTaskRepository.generateUpcomingUserTasks(
+        ctx.userId,
+        12,
+        ctx,
+        { assetIds }
+      );
       return result;
     } catch (error) {
       ctx.log?.error(

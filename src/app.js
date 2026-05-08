@@ -238,7 +238,13 @@ const menuUsecase = new menuUc(menuRepository);
 const userAccessMenuUsecase = new userAccessMenuUc(userAccessMenuRepository);
 const taskUsecase = new taskUc(taskRepository, taskScheduleRepository, taskLogRepository, taskParentRepository);
 const taskGroupUsecase = new taskGroupUc(taskGroupRepository);
-const userTaskUsecase = new userTaskUc(userTaskRepository, taskRepository, taskScheduleRepository, userTaskEvidenceRepository);
+const userTaskUsecase = new userTaskUc(
+  userTaskRepository,
+  taskRepository,
+  taskScheduleRepository,
+  userTaskEvidenceRepository,
+  userAssetRepository
+);
 const scanInfoUsecase = new scanInfoUc(scanInfoRepository);
 const complaintReportUsecase = new complaintReportUc(
   complaintReportRepository,

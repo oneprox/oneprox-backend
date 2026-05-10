@@ -99,6 +99,26 @@ TenantPaymentLog.init({
     allowNull: true,
     comment: 'Last charge date'
   },
+  spk: {
+    type: DataTypes.STRING(255),
+    allowNull: true,
+    comment: 'Nomor SPK',
+  },
+  invoice_number: {
+    type: DataTypes.STRING(255),
+    allowNull: true,
+    comment: 'Nomor invoice',
+  },
+  invoice_date: {
+    type: DataTypes.DATEONLY,
+    allowNull: true,
+    comment: 'Tanggal invoice',
+  },
+  pph: {
+    type: DataTypes.FLOAT,
+    allowNull: true,
+    comment: 'Nilai PPh (Rp)',
+  },
   created_by: {
     type: DataTypes.UUID,
     allowNull: true,

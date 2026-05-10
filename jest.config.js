@@ -1,6 +1,8 @@
 // jest.config.js
 module.exports = {
-  // ... other Jest configurations
+  setupFiles: ['<rootDir>/jest.setup-env.js'],
   coverageDirectory: './custom-coverage-reports',
   coverageReporters: ['json', 'lcov', 'text-summary'],
+  testTimeout: 60000,
+  testPathIgnorePatterns: ['/node_modules/'],
 };

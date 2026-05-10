@@ -215,7 +215,6 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
   // Payment Log endpoints
   router.post('/:id/payments', [
     param('id').isUUID().withMessage('ID must be a valid UUID'),
-    body('amount').optional().isFloat({ min: 0 }).withMessage('amount must be a positive number'),
     body('paid_amount').optional().isFloat({ min: 0 }).withMessage('paid_amount must be a valid number (>= 0)'),
     body('payment_date').optional().isISO8601().withMessage('payment_date must be a valid date'),
     body('payment_deadline').notEmpty().isISO8601().withMessage('payment_deadline is required and must be a valid date'),
@@ -236,6 +235,29 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
       .withMessage('overdue must be a positive number'),
     body('rate').optional().isFloat({ min: 0 }).withMessage('rate must be a positive number'),
     body('last_charge_date').optional().isISO8601().withMessage('last_charge_date must be a valid date'),
+    body('spk')
+      .optional({ nullable: true })
+      .custom((v) => v === null || v === undefined || typeof v === 'string')
+      .withMessage('spk must be a string'),
+    body('invoice_number')
+      .optional({ nullable: true })
+      .custom((v) => v === null || v === undefined || typeof v === 'string')
+      .withMessage('invoice_number must be a string'),
+    body('invoice_date')
+      .optional({ nullable: true })
+      .custom((v) => {
+        if (v === null || v === undefined || v === '') return true;
+        return !Number.isNaN(Date.parse(String(v)));
+      })
+      .withMessage('invoice_date must be a valid date'),
+    body('pph')
+      .optional({ nullable: true })
+      .custom((value) => {
+        if (value === null || value === undefined || value === '') return true;
+        const n = Number(value);
+        return !Number.isNaN(n) && n >= 0;
+      })
+      .withMessage('pph must be a positive number'),
   ], async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -246,7 +268,6 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
       req.log?.info({ tenant_id: req.params.id, body: req.body }, "TenantRouter.createPaymentLog");
       const paymentLog = await TenantPaymentLogUsecase.createPaymentLog({
         tenant_id: req.params.id,
-        amount: req.body.amount,
         paid_amount: req.body.paid_amount,
         payment_date: req.body.payment_date,
         payment_deadline: req.body.payment_deadline,
@@ -259,6 +280,10 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
         overdue: req.body.overdue,
         rate: req.body.rate,
         last_charge_date: req.body.last_charge_date,
+        spk: req.body.spk,
+        invoice_number: req.body.invoice_number,
+        invoice_date: req.body.invoice_date,
+        pph: req.body.pph,
       }, {
         userId: req.auth.userId,
         log: req.log
@@ -337,6 +362,29 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
       .withMessage('overdue must be a positive number'),
     body('rate').optional().isFloat({ min: 0 }).withMessage('rate must be a positive number'),
     body('last_charge_date').optional().isISO8601().withMessage('last_charge_date must be a valid date'),
+    body('spk')
+      .optional({ nullable: true })
+      .custom((v) => v === null || v === undefined || typeof v === 'string')
+      .withMessage('spk must be a string'),
+    body('invoice_number')
+      .optional({ nullable: true })
+      .custom((v) => v === null || v === undefined || typeof v === 'string')
+      .withMessage('invoice_number must be a string'),
+    body('invoice_date')
+      .optional({ nullable: true })
+      .custom((v) => {
+        if (v === null || v === undefined || v === '') return true;
+        return !Number.isNaN(Date.parse(String(v)));
+      })
+      .withMessage('invoice_date must be a valid date'),
+    body('pph')
+      .optional({ nullable: true })
+      .custom((value) => {
+        if (value === null || value === undefined || value === '') return true;
+        const n = Number(value);
+        return !Number.isNaN(n) && n >= 0;
+      })
+      .withMessage('pph must be a positive number'),
   ], async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {

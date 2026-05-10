@@ -22,23 +22,22 @@ class TenantPaymentLogUsecase {
       // billing_period, billing_amount, and payment_deadline are mandatory
       // payment_date, paid_amount can be null initially
       // Jika payment_date / paid_amount diisi saat create, status otomatis paid.
-      const hasPaymentDate = data.payment_date != null;
-      const paidAmount =
+      const paidAmountRaw =
         data.paid_amount !== undefined && data.paid_amount !== null
           ? Number(data.paid_amount)
           : null;
-      const isPaidByAmount = paidAmount !== null && !Number.isNaN(paidAmount) && paidAmount > 0;
-      const shouldBePaid = hasPaymentDate || isPaidByAmount;
+      const isPaidByAmount =
+        paidAmountRaw !== null && !Number.isNaN(paidAmountRaw) && paidAmountRaw > 0;
+      const shouldBePaid = isPaidByAmount;
 
-      // Backward-compatible: jika tidak ada paid_amount tapi ada payment_date, gunakan amount sebagai paid_amount.
       const paidAmountToSave =
-        paidAmount !== null && !Number.isNaN(paidAmount)
-          ? paidAmount
-          : (hasPaymentDate ? (data.amount ?? null) : null);
+        paidAmountRaw !== null && !Number.isNaN(paidAmountRaw)
+          ? paidAmountRaw
+          : null;
 
       const paymentLog = await this.tenantPaymentLogRepository.create({
         tenant_id: data.tenant_id,
-        amount: data.amount || null,
+        amount: null,
         paid_amount: paidAmountToSave,
         payment_date: data.payment_date || null, // Use provided payment_date or null
         payment_deadline: data.payment_deadline, // Payment deadline (mandatory)
@@ -52,6 +51,10 @@ class TenantPaymentLogUsecase {
         overdue: data.overdue || null,
         rate: data.rate !== undefined ? data.rate : 0.01,
         last_charge_date: data.last_charge_date || null,
+        spk: data.spk != null && String(data.spk).trim() !== '' ? String(data.spk).trim() : null,
+        invoice_number: data.invoice_number != null && String(data.invoice_number).trim() !== '' ? String(data.invoice_number).trim() : null,
+        invoice_date: data.invoice_date ? String(data.invoice_date).slice(0, 10) : null,
+        pph: data.pph !== undefined && data.pph !== null && !Number.isNaN(Number(data.pph)) ? Number(data.pph) : null,
         created_by: ctx.userId,
         updated_by: ctx.userId,
       }, ctx);

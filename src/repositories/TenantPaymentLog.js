@@ -13,7 +13,7 @@ class TenantPaymentLogRepository {
       const now = new Date();
       const paymentLog = await this.tenantPaymentLogModel.create({
         tenant_id: data.tenant_id,
-        amount: data.amount,
+        amount: data.amount != null ? data.amount : null,
         paid_amount: data.paid_amount || null, // Can be null, will be filled when payment is made
         payment_date: data.payment_date || null, // Can be null, will be filled when payment is made
         payment_deadline: data.payment_deadline || null, // Payment deadline (optional)
@@ -27,6 +27,13 @@ class TenantPaymentLogRepository {
         overdue: data.overdue || null,
         rate: data.rate !== undefined ? data.rate : 0.01,
         last_charge_date: data.last_charge_date || null,
+        spk: data.spk != null && data.spk !== '' ? String(data.spk).trim() : null,
+        invoice_number: data.invoice_number != null && data.invoice_number !== '' ? String(data.invoice_number).trim() : null,
+        invoice_date: data.invoice_date ? String(data.invoice_date).slice(0, 10) : null,
+        pph:
+          data.pph !== undefined && data.pph !== null && !Number.isNaN(Number(data.pph))
+            ? Number(data.pph)
+            : null,
         created_by: data.created_by || ctx.userId || null,
         updated_by: data.updated_by || ctx.userId || null,
         created_at: now,

@@ -1,4 +1,5 @@
-const { Sequelize } = require('sequelize');
+const sequelizeModule = require('sequelize');
+const Sequelize = sequelizeModule.Sequelize || sequelizeModule.default || sequelizeModule;
 
 const DB_TYPE = (process.env.DB_TYPE || 'postgres').toLowerCase();
 let sequelize;

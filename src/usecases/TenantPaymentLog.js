@@ -94,20 +94,21 @@ class TenantPaymentLogUsecase {
         }
       }
 
-      // Auto-derive payment status from paid_amount when explicitly provided:
-      // paid_amount <= 0  => unpaid
-      // paid_amount > 0   => paid
-      if (updateData.paid_amount !== undefined && updateData.paid_amount !== null) {
-        const paidAmountNumber = Number(updateData.paid_amount);
+      // Auto-derive payment status dari paid_amount bila field ikut di-update:
+      // paid_amount null / 0 / <= 0  => unpaid + bersihkan field pelunasan
+      // paid_amount > 0               => paid
+      if (updateData.paid_amount !== undefined) {
+        const raw = updateData.paid_amount;
+        const paidAmountNumber =
+          raw === null || raw === '' ? 0 : Number(raw);
         if (!Number.isNaN(paidAmountNumber)) {
           updateData.status = paidAmountNumber > 0 ? 1 : 0;
+          updateData.paid_amount = paidAmountNumber > 0 ? paidAmountNumber : null;
           if (paidAmountNumber <= 0) {
             updateData.payment_date = null;
             updateData.payment_method = null;
-            updateData.outstanding = null;
-            updateData.overdue = null;
-            updateData.rate = null;
-            updateData.last_charge_date = null;
+            // outstanding, overdue, rate, last_charge_date: biarkan nilai dari body;
+            // jangan di-null otomatis agar update rate/penagihan saat unpaid tetap tersimpan.
           }
         }
       }

@@ -1257,6 +1257,29 @@ class DashboardUsecase {
 
             const deskripsi = paymentData.billing_type || paymentData.billing_period || 'Tagihan Sewa';
 
+            const invNum =
+              paymentData.invoice_number != null && String(paymentData.invoice_number).trim() !== ''
+                ? String(paymentData.invoice_number).trim()
+                : `INV-${paymentData.id}`;
+
+            let tanggalInvoiceStr = '-';
+            if (paymentData.invoice_date) {
+              const invD = new Date(String(paymentData.invoice_date).slice(0, 10));
+              if (!Number.isNaN(invD.getTime())) {
+                tanggalInvoiceStr = invD.toLocaleDateString('id-ID', {
+                  day: 'numeric',
+                  month: 'long',
+                  year: 'numeric',
+                });
+              }
+            } else if (paymentData.created_at) {
+              tanggalInvoiceStr = new Date(paymentData.created_at).toLocaleDateString('id-ID', {
+                day: 'numeric',
+                month: 'long',
+                year: 'numeric',
+              });
+            }
+
             financialTableData.push({
               id: paymentData.id,
               tenantId: tenantData.id,
@@ -1270,10 +1293,22 @@ class DashboardUsecase {
               }),
               dueDateIso: deadline.toISOString(),
               deskripsi: deskripsi,
-              nomorInvoice: `INV-${paymentData.id}`,
+              nomorInvoice: invNum,
+              periodeTagihan:
+                paymentData.billing_period != null && String(paymentData.billing_period).trim() !== ''
+                  ? String(paymentData.billing_period).trim()
+                  : '-',
+              nomorSpk:
+                paymentData.spk != null && String(paymentData.spk).trim() !== ''
+                  ? String(paymentData.spk).trim()
+                  : '-',
+              catatan:
+                paymentData.notes != null && String(paymentData.notes).trim() !== ''
+                  ? String(paymentData.notes).trim()
+                  : '-',
               nilaiInvoice: parseFloat(paymentData.amount) || parseFloat(paymentData.billing_amount) || 0,
               sisaNilai: remainingRentValue,
-              tanggalInvoice: paymentData.created_at ? new Date(paymentData.created_at).toLocaleDateString('id-ID') : '-',
+              tanggalInvoice: tanggalInvoiceStr,
               status: status,
               aging: aging > 0 ? aging : 0,
             });
@@ -1283,15 +1318,14 @@ class DashboardUsecase {
         }
       }
       
-      // Sort by deadline date (tanggal kecil dulu / ascending)
+      // Sort by deadline (dueDateIso) ascending
       financialTableData.sort((a, b) => {
-        // Jika tidak ada deadline, taruh di akhir
-        if (!a.deadlineTimestamp && !b.deadlineTimestamp) return 0;
-        if (!a.deadlineTimestamp) return 1;
-        if (!b.deadlineTimestamp) return -1;
-        
-        // Urutkan berdasarkan tanggal jatuh tempo dari yang terkecil
-        return a.deadlineTimestamp - b.deadlineTimestamp;
+        const ta = a.dueDateIso ? new Date(a.dueDateIso).getTime() : NaN;
+        const tb = b.dueDateIso ? new Date(b.dueDateIso).getTime() : NaN;
+        if (Number.isNaN(ta) && Number.isNaN(tb)) return 0;
+        if (Number.isNaN(ta)) return 1;
+        if (Number.isNaN(tb)) return -1;
+        return ta - tb;
       });
       
       return financialTableData;

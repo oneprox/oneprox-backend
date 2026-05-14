@@ -233,7 +233,7 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
       .optional({ nullable: true })
       .isFloat({ min: 0 })
       .withMessage('overdue must be a positive number'),
-    body('rate').optional().isFloat({ min: 0 }).withMessage('rate must be a positive number'),
+    body('rate').optional().isFloat({ min: 0 }).withMessage('rate must be a number >= 0'),
     body('last_charge_date').optional().isISO8601().withMessage('last_charge_date must be a valid date'),
     body('spk')
       .optional({ nullable: true })
@@ -360,7 +360,7 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
       .optional({ nullable: true })
       .isFloat({ min: 0 })
       .withMessage('overdue must be a positive number'),
-    body('rate').optional().isFloat({ min: 0 }).withMessage('rate must be a positive number'),
+    body('rate').optional().isFloat({ min: 0 }).withMessage('rate must be a number >= 0'),
     body('last_charge_date').optional().isISO8601().withMessage('last_charge_date must be a valid date'),
     body('spk')
       .optional({ nullable: true })

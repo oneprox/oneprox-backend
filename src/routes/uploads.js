@@ -24,10 +24,27 @@ function InitUploadRouter() {
     }
   });
 
-  const upload = multer({ 
+  const maxUploadBytes = Number(process.env.UPLOAD_MAX_FILE_BYTES) || 25 * 1024 * 1024;
+  const upload = multer({
     storage: storage,
-    limits: { fileSize: 5 * 1024 * 1024 } // 5MB
+    limits: { fileSize: maxUploadBytes },
   });
+
+  function singleFile(fieldName) {
+    return (req, res, next) => {
+      upload.single(fieldName)(req, res, (err) => {
+        if (err instanceof multer.MulterError) {
+          if (err.code === 'LIMIT_FILE_SIZE') {
+            const mb = Math.max(1, Math.round(maxUploadBytes / (1024 * 1024)));
+            return res.status(413).json({ error: `File exceeds the ${mb}MB upload limit` });
+          }
+          return res.status(400).json({ error: err.message });
+        }
+        if (err) return next(err);
+        next();
+      });
+    };
+  }
 
   // Test route without auth for debugging
   router.get('/test', (req, res) => {
@@ -40,7 +57,7 @@ function InitUploadRouter() {
   });
 
   // Simple upload route without auth for testing
-  router.post('/simple-upload', upload.single('file'), compressUploadedImages, (req, res) => {
+  router.post('/simple-upload', singleFile('file'), compressUploadedImages, (req, res) => {
     
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
@@ -57,7 +74,7 @@ function InitUploadRouter() {
   });
 
   // Tenant upload route with auth
-  router.post('/:type', authMiddleware, ensureRole, upload.single('file'), compressUploadedImages, (req, res) => {
+  router.post('/:type', authMiddleware, ensureRole, singleFile('file'), compressUploadedImages, (req, res) => {
     
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });

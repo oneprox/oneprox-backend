@@ -30,6 +30,21 @@ function getLogoAttachment(cid) {
   };
 }
 
+function escapeHtmlAttr(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function escapeHtmlText(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 function createTransportFromEnv() {
   const host = process.env.SMTP_HOST;
   const port = process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : 587;
@@ -50,6 +65,8 @@ async function sendPasswordResetEmail({ to, resetUrl, userName = 'Pengguna' }) {
   const { transport, from } = createTransportFromEnv();
   const logoCid = 'logo@peruriproperty';
   const logoAttachment = getLogoAttachment(logoCid);
+  const safeResetUrl = escapeHtmlAttr(resetUrl);
+  const safeUserName = escapeHtmlText(userName);
 
   // Plain text version for email clients that don't support HTML
   const text =
@@ -93,7 +110,7 @@ async function sendPasswordResetEmail({ to, resetUrl, userName = 'Pengguna' }) {
           <tr>
             <td style="padding: 40px 40px 30px; background-color: #ffffff;">
               <!-- Greeting -->
-              <p style="margin: 0 0 16px; font-size: 16px; font-weight: 600; color: #1a1a1a; line-height: 1.5;">Hi ${userName},</p>
+              <p style="margin: 0 0 16px; font-size: 16px; font-weight: 600; color: #1a1a1a; line-height: 1.5;">Hi ${safeUserName},</p>
               
               <!-- Instruction Text -->
               <p style="margin: 0 0 32px; font-size: 16px; line-height: 1.6; color: #1a1a1a;">
@@ -104,10 +121,15 @@ async function sendPasswordResetEmail({ to, resetUrl, userName = 'Pengguna' }) {
               <table role="presentation" style="width: 100%; margin: 0 0 32px;">
                 <tr>
                   <td align="center" style="padding: 0;">
-                    <a href="#" style="display: inline-block; padding: 14px 40px; background-color: #2F70FF; color: #ffffff; text-decoration: none; border-radius: 6px; font-size: 16px; font-weight: 600; text-align: center;">Reset Password</a>
+                    <a href="${safeResetUrl}" style="display: inline-block; padding: 14px 40px; background-color: #2F70FF; color: #ffffff; text-decoration: none; border-radius: 6px; font-size: 16px; font-weight: 600; text-align: center;">Reset Password</a>
                   </td>
                 </tr>
               </table>
+
+              <p style="margin: 0 0 32px; font-size: 14px; line-height: 1.6; color: #4b5563; word-break: break-all;">
+                Jika tombol tidak berfungsi, salin dan buka link berikut di browser Anda:<br />
+                <a href="${safeResetUrl}" style="color: #2F70FF; text-decoration: underline;">${safeResetUrl}</a>
+              </p>
               
               <!-- Expiration Notice -->
               <p style="margin: 0; font-size: 16px; line-height: 1.6; color: #1a1a1a;">

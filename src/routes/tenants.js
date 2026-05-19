@@ -141,7 +141,9 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
       res.status(202).json(createResponse(updated, "success", 202));
     } catch (err) {
       req.log?.error({ tenant_id: req.params.id, update_data: req.body }, `TenantRouter.updateTenant_error: ${err.message}`);
-      res.status(500).json(createResponse(null, "internal server error", 500));
+      const status = err.statusCode === 400 ? 400 : 500;
+      const message = err.message || (status === 400 ? 'failed' : 'internal server error');
+      res.status(status).json(createResponse(null, message, status, false, {}, err));
     }
   });
 

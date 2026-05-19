@@ -411,41 +411,241 @@ class TenantUseCase {
     }
   }
 
+  isTenantStatusActive(status) {
+    if (status === undefined || status === null) return false;
+    if (typeof status === 'string') {
+      return TenantStatusStrToInt[status] === 1;
+    }
+    return Number(status) === 1;
+  }
+
+  resolveTenantStatusInt(status) {
+    if (status === undefined || status === null) return undefined;
+    if (typeof status === 'number') return status;
+    if (typeof status === 'string') {
+      const parsed = parseInt(status, 10);
+      if (!Number.isNaN(parsed) && parsed >= 0 && parsed <= 5) return parsed;
+      return TenantStatusStrToInt[status];
+    }
+    return undefined;
+  }
+
+  /**
+   * Pastikan unit/asset siap sebelum tenant diaktifkan (status available, tidak dipakai tenant aktif lain).
+   */
+  async validateResourcesAvailableForActivation(tenantId, ctx) {
+    const { UnitStatusStrToInt, UnitStatusIntToStr } = require('../models/Unit');
+    const { QueryTypes } = require('sequelize');
+    const sequelizeInstance = this.tenantUnitRepository.tenantUnitModel.sequelize;
+
+    const unitIssues = [];
+    const assetIssues = [];
+
+    const tenantUnits = await this.tenantUnitRepository.getByTenantID(tenantId);
+    for (const tu of tenantUnits) {
+      const unitId = tu.unit_id || tu.get?.('unit_id') || tu.toJSON?.()?.unit_id;
+      if (!unitId) continue;
+
+      const unit = await this.unitRepository.findById(unitId, ctx);
+      const unitName = unit?.name || unitId;
+
+      const otherActiveTenantId = await this.tenantUnitRepository.findActiveTenantIdByUnitId(
+        unitId,
+        tenantId
+      );
+      if (otherActiveTenantId) {
+        let otherName = '';
+        try {
+          const otherTenant = await this.tenantRepository.findById(otherActiveTenantId, ctx);
+          otherName = otherTenant?.name ? ` (${otherTenant.name})` : '';
+        } catch (_) {
+          /* ignore */
+        }
+        unitIssues.push(
+          `Unit "${unitName}" masih digunakan tenant aktif lain${otherName}`
+        );
+        continue;
+      }
+
+      if (!unit) {
+        unitIssues.push(`Unit "${unitName}" tidak ditemukan`);
+        continue;
+      }
+
+      let statusInt = unit.status;
+      if (typeof statusInt === 'string') {
+        statusInt = UnitStatusStrToInt[statusInt];
+      }
+      if (statusInt !== UnitStatusStrToInt.available) {
+        const statusLabel = UnitStatusIntToStr[statusInt] || 'occupied';
+        unitIssues.push(
+          `Unit "${unitName}" masih berstatus ${statusLabel} (belum available)`
+        );
+      }
+    }
+
+    const tenantAssets = await this.tenantAssetRepository.getByTenantID(tenantId);
+    for (const ta of tenantAssets) {
+      const assetId = ta.asset_id || ta.get?.('asset_id') || ta.toJSON?.()?.asset_id;
+      if (!assetId) continue;
+
+      const otherActiveTenantId = await this.tenantAssetRepository.findActiveTenantIdByAssetId(
+        assetId,
+        tenantId
+      );
+      if (!otherActiveTenantId) continue;
+
+      let assetName = assetId;
+      try {
+        const rows = await sequelizeInstance.query(
+          `SELECT name FROM assets WHERE id = :assetId LIMIT 1`,
+          { replacements: { assetId }, type: QueryTypes.SELECT }
+        );
+        if (rows[0]?.name) assetName = rows[0].name;
+      } catch (_) {
+        /* ignore */
+      }
+
+      let otherName = '';
+      try {
+        const otherTenant = await this.tenantRepository.findById(otherActiveTenantId, ctx);
+        otherName = otherTenant?.name ? ` (${otherTenant.name})` : '';
+      } catch (_) {
+        /* ignore */
+      }
+
+      assetIssues.push(
+        `Asset "${assetName}" masih digunakan tenant aktif lain${otherName}`
+      );
+    }
+
+    if (unitIssues.length === 0 && assetIssues.length === 0) {
+      return;
+    }
+
+    const parts = [];
+    if (unitIssues.length > 0) {
+      parts.push(`Unit: ${unitIssues.join('; ')}`);
+    }
+    if (assetIssues.length > 0) {
+      parts.push(`Asset: ${assetIssues.join('; ')}`);
+    }
+
+    const err = new Error(
+      `Tidak dapat mengaktifkan tenant. ${parts.join(' ')} Bebaskan unit/asset terlebih dahulu atau pilih yang lain.`
+    );
+    err.statusCode = 400;
+    err.code = 'TENANT_RESOURCE_CONFLICT';
+    throw err;
+  }
+
+  /**
+   * Unit hanya status occupied jika tenant aktif; selain itu available agar tenant lain bisa pakai.
+   */
+  async syncTenantUnitOccupancy(tenantId, tenantStatus, ctx, transaction = null) {
+    const statusInt = this.resolveTenantStatusInt(tenantStatus);
+    if (statusInt === undefined) return;
+
+    if (this.isTenantStatusActive(statusInt)) {
+      await this.validateResourcesAvailableForActivation(tenantId, ctx);
+      await this.occupyUnitsForTenant(tenantId, ctx, transaction);
+    } else {
+      await this.releaseUnitsForTenant(tenantId, ctx, transaction);
+    }
+  }
+
+  async releaseUnitsForTenant(tenantId, ctx, transaction = null) {
+    const { UnitStatusStrToInt } = require('../models/Unit');
+    const tenantUnits = await this.tenantUnitRepository.getByTenantID(tenantId);
+    const updateCtx = transaction ? { ...ctx, transaction } : ctx;
+
+    for (const tu of tenantUnits) {
+      const unitId = tu.unit_id || tu.get?.('unit_id') || tu.toJSON?.()?.unit_id;
+      if (!unitId) continue;
+
+      const otherActiveTenantId = await this.tenantUnitRepository.findActiveTenantIdByUnitId(
+        unitId,
+        tenantId
+      );
+      if (otherActiveTenantId) continue;
+
+      await this.unitRepository.update(
+        unitId,
+        {
+          status: UnitStatusStrToInt.available,
+          updated_by: ctx.userId,
+        },
+        updateCtx
+      );
+    }
+  }
+
+  async occupyUnitsForTenant(tenantId, ctx, transaction = null) {
+    const { UnitStatusStrToInt } = require('../models/Unit');
+    const tenantUnits = await this.tenantUnitRepository.getByTenantID(tenantId);
+    const updateCtx = transaction ? { ...ctx, transaction } : ctx;
+
+    for (const tu of tenantUnits) {
+      const unitId = tu.unit_id || tu.get?.('unit_id') || tu.toJSON?.()?.unit_id;
+      if (!unitId) continue;
+
+      await this.unitRepository.update(
+        unitId,
+        {
+          status: UnitStatusStrToInt.occupied,
+          updated_by: ctx.userId,
+        },
+        updateCtx
+      );
+    }
+  }
+
   async saveTenantUnits(tenant, data, t, ctx) {
     ctx.log?.info({ unit_ids: data }, "TenantUsecase.saveTenantUnits");
-    const { UnitStatusStrToInt } = require("../models/Unit");
-    
-    for (let i = 0; i < data.length; i++) {
-      let dataUnit = {
-        tenant_id: tenant.id,
-        unit_id: data[i],
-      };
 
-      await this.tenantUnitRepository.create(dataUnit, t, ctx);
-      
-      // Update unit status to 'occupied' when tenant is created
-      ctx.log?.info({ unit_id: data[i], status: UnitStatusStrToInt['occupied'] }, "TenantUsecase.saveTenantUnits - updating unit status to occupied");
-      const updateCtx = { ...ctx, transaction: t };
-      const updatedUnit = await this.unitRepository.update(data[i], {
-        status: UnitStatusStrToInt['occupied'], // 1 = occupied
-        updated_by: ctx.userId,
-      }, updateCtx);
-      
-      ctx.log?.info({ unit_id: data[i], updated: !!updatedUnit }, "TenantUsecase.saveTenantUnits - unit status updated");
+    for (let i = 0; i < data.length; i++) {
+      const unitId = data[i];
+      const activeTenantId = await this.tenantUnitRepository.findActiveTenantIdByUnitId(unitId);
+      if (activeTenantId) {
+        throw new Error(
+          'Unit yang dipilih masih digunakan tenant aktif lain. Nonaktifkan tenant tersebut atau pilih unit lain.'
+        );
+      }
+
+      await this.tenantUnitRepository.create(
+        {
+          tenant_id: tenant.id,
+          unit_id: unitId,
+        },
+        t,
+        ctx
+      );
     }
+
+    await this.syncTenantUnitOccupancy(tenant.id, tenant.status, ctx, t);
   }
 
   async saveTenantAssets(tenant, data, t, ctx) {
     ctx.log?.info({ asset_ids: data }, "TenantUsecase.saveTenantAssets");
-    
-    for (let i = 0; i < data.length; i++) {
-      let dataAsset = {
-        tenant_id: tenant.id,
-        asset_id: data[i],
-      };
 
-      await this.tenantAssetRepository.create(dataAsset, t, ctx);
-      ctx.log?.info({ asset_id: data[i] }, "TenantUsecase.saveTenantAssets - asset linked to tenant");
+    for (let i = 0; i < data.length; i++) {
+      const assetId = data[i];
+      const activeTenantId = await this.tenantAssetRepository.findActiveTenantIdByAssetId(assetId);
+      if (activeTenantId) {
+        throw new Error(
+          'Asset yang dipilih masih digunakan tenant aktif lain. Nonaktifkan tenant tersebut atau pilih asset lain.'
+        );
+      }
+
+      await this.tenantAssetRepository.create(
+        {
+          tenant_id: tenant.id,
+          asset_id: assetId,
+        },
+        t,
+        ctx
+      );
+      ctx.log?.info({ asset_id: assetId }, "TenantUsecase.saveTenantAssets - asset linked to tenant");
     }
   }
 
@@ -667,8 +867,33 @@ class TenantUseCase {
         throw new Error('Tenant not found');
       }
 
-      // Update tenant
+      const oldStatusInt = this.resolveTenantStatusInt(oldTenant.status);
+
+      const newStatusInt =
+        data.status !== undefined
+          ? this.resolveTenantStatusInt(data.status)
+          : oldStatusInt;
+
+      const activating =
+        newStatusInt !== undefined &&
+        oldStatusInt !== undefined &&
+        !this.isTenantStatusActive(oldStatusInt) &&
+        this.isTenantStatusActive(newStatusInt);
+
+      if (activating) {
+        await this.validateResourcesAvailableForActivation(id, ctx);
+      }
+
       const updatedTenant = await this.tenantRepository.update(id, data);
+
+      if (
+        data.status !== undefined &&
+        oldStatusInt !== undefined &&
+        newStatusInt !== undefined &&
+        oldStatusInt !== newStatusInt
+      ) {
+        await this.syncTenantUnitOccupancy(id, newStatusInt, ctx);
+      }
       
       // Create log entry - only log changed fields
       const changedFields = {};
@@ -770,16 +995,8 @@ class TenantUseCase {
       // Delete tenant units
       await this.tenantUnitRepository.deleteByTenantId(id, { ...ctx, transaction });
       
-      // Update unit status back to 'available' when tenant is deleted
-      const { UnitStatusStrToInt } = require("../models/Unit");
-      if (tenantUnits && tenantUnits.length > 0) {
-        for (let i = 0; i < tenantUnits.length; i++) {
-          await this.unitRepository.update(tenantUnits[i].unit_id, {
-            status: UnitStatusStrToInt['available'], // 0 = available
-            updated_by: ctx.userId,
-          }, { ...ctx, transaction });
-        }
-      }
+      // Bebaskan unit jika tidak ada tenant aktif lain yang memakai
+      await this.releaseUnitsForTenant(id, { ...ctx, transaction });
       
       // Delete tenant attachments
       await this.tenantAttachmentRepository.deleteByTenantId(id, { ...ctx, transaction });

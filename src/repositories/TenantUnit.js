@@ -19,6 +19,33 @@ class TenantUnitRepository {
     })
   }
 
+  /**
+   * Tenant aktif lain (status = 1) yang masih memegang unit ini.
+   * @returns {string|null} tenant_id
+   */
+  async findActiveTenantIdByUnitId(unitId, excludeTenantId = null) {
+    const { QueryTypes } = require('sequelize');
+    const replacements = { unitId };
+    let excludeSql = '';
+    if (excludeTenantId) {
+      excludeSql = 'AND t.id != :excludeTenantId';
+      replacements.excludeTenantId = excludeTenantId;
+    }
+    const rows = await this.tenantUnitModel.sequelize.query(
+      `
+      SELECT t.id AS tenant_id
+      FROM tenant_units tu
+      INNER JOIN tenants t ON t.id = tu.tenant_id
+      WHERE tu.unit_id = :unitId
+        AND t.status = 1
+        ${excludeSql}
+      LIMIT 1
+      `,
+      { replacements, type: QueryTypes.SELECT }
+    );
+    return rows[0]?.tenant_id ?? null;
+  }
+
   async deleteByTenantId(tenantId, ctx) {
     try {
       ctx.log?.info({ tenant_id: tenantId }, "TenantUnitRepository.deleteByTenantId");

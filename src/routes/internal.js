@@ -295,7 +295,7 @@ function InitInternalRouter({
             email: userEmail,
             deadline: dl,
             daysLeft: left,
-            amount: pl.amount,
+            amount: pl.billing_amount ?? pl.amount,
             paymentStatus,
           };
           items.push(item);
@@ -311,7 +311,7 @@ function InitInternalRouter({
               tenantName: tenant?.name,
               tenantCode: tenant?.code,
               paymentId: pl.id,
-              amount: pl.amount,
+              amount: pl.billing_amount ?? pl.amount,
               deadline: dl,
               daysLeft: left,
             });

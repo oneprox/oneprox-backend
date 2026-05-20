@@ -224,7 +224,10 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
     body('notes').optional().isString(),
     body('billing_type').optional().isString().withMessage('billing_type must be a string'),
     body('billing_period').notEmpty().isString().withMessage('billing_period is required and must be a string'),
-    body('billing_amount').notEmpty().isFloat({ min: 0 }).withMessage('billing_amount is required and must be a positive number'),
+    body('amount').notEmpty().isFloat({ min: 0 }).withMessage('amount is required and must be a positive number'),
+    body('ppn_percent').optional().isFloat({ min: 0 }).withMessage('ppn_percent must be a number >= 0'),
+    body('ppn').optional().isFloat({ min: 0 }).withMessage('ppn must be a number >= 0'),
+    body('billing_amount').optional().isFloat({ min: 0 }).withMessage('billing_amount must be a positive number'),
     body('outstanding')
       .customSanitizer(v => (v === '' ? null : v))
       .optional({ nullable: true })
@@ -277,6 +280,9 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
         notes: req.body.notes,
         billing_type: req.body.billing_type,
         billing_period: req.body.billing_period,
+        amount: req.body.amount,
+        ppn_percent: req.body.ppn_percent,
+        ppn: req.body.ppn,
         billing_amount: req.body.billing_amount,
         outstanding: req.body.outstanding,
         overdue: req.body.overdue,
@@ -351,6 +357,9 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
     body('notes').optional().isString(),
     body('billing_type').optional().isString().withMessage('billing_type must be a string'),
     body('billing_period').optional().isString().withMessage('billing_period must be a string'),
+    body('amount').optional().isFloat({ min: 0 }).withMessage('amount must be a positive number'),
+    body('ppn_percent').optional().isFloat({ min: 0 }).withMessage('ppn_percent must be a number >= 0'),
+    body('ppn').optional().isFloat({ min: 0 }).withMessage('ppn must be a number >= 0'),
     body('billing_amount').optional().isFloat({ min: 0 }).withMessage('billing_amount must be a positive number'),
     body('outstanding')
       .customSanitizer(v => (v === '' ? null : v))

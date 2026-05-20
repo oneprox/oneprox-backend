@@ -23,6 +23,14 @@ class TenantPaymentLogRepository {
         billing_type: data.billing_type || null,
         billing_period: data.billing_period || null,
         billing_amount: data.billing_amount || null,
+        ppn:
+          data.ppn !== undefined && data.ppn !== null && !Number.isNaN(Number(data.ppn))
+            ? Number(data.ppn)
+            : null,
+        ppn_percent:
+          data.ppn_percent !== undefined && data.ppn_percent !== null && !Number.isNaN(Number(data.ppn_percent))
+            ? Number(data.ppn_percent)
+            : null,
         outstanding: data.outstanding || null,
         overdue: data.overdue || null,
         rate: data.rate !== undefined ? data.rate : 0.01,
@@ -102,11 +110,17 @@ class TenantPaymentLogRepository {
         whereClause.status = statusInt;
       }
       
-      // Build order clause: always sort by payment_date ASC first, then payment_deadline ASC
-      // NULLS LAST ensures null payment_date values come after non-null values
-      let orderClause = [
-        Sequelize.literal(`payment_date ASC NULLS LAST`),
-        ['payment_deadline', 'ASC']
+      const ALLOWED_ORDER_COLUMNS = [
+        'invoice_number', 'status', 'billing_period', 'payment_deadline',
+        'billing_type', 'spk', 'invoice_date', 'pph', 'amount', 'ppn', 'ppn_percent', 'billing_amount',
+        'payment_date', 'paid_amount', 'payment_method', 'outstanding',
+        'overdue', 'rate', 'last_charge_date', 'created_at', 'id',
+      ];
+      const sortColumn = ALLOWED_ORDER_COLUMNS.includes(orderBy) ? orderBy : 'payment_deadline';
+      const sortDirection = String(order).toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+      const orderClause = [
+        [sortColumn, sortDirection],
+        ['id', 'DESC'],
       ];
       
       const { rows, count } = await this.tenantPaymentLogModel.findAndCountAll({

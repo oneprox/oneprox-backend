@@ -1,6 +1,7 @@
 const sequelize = require("../models/sequelize");
 const { PaymentLogStatusIntToStr } = require("../models/TenantPaymentLog");
 const { updateTenantPaymentStatus } = require("../routes/internal");
+const { normalizePaymentBillingFields } = require("../utils/paymentBilling");
 
 class TenantPaymentLogUsecase {
   constructor(tenantPaymentLogRepository, tenantRepository) {
@@ -35,9 +36,11 @@ class TenantPaymentLogUsecase {
           ? paidAmountRaw
           : null;
 
+      const billingFields = normalizePaymentBillingFields(data);
+
       const paymentLog = await this.tenantPaymentLogRepository.create({
         tenant_id: data.tenant_id,
-        amount: null,
+        amount: billingFields.amount,
         paid_amount: paidAmountToSave,
         payment_date: data.payment_date || null, // Use provided payment_date or null
         payment_deadline: data.payment_deadline, // Payment deadline (mandatory)
@@ -46,7 +49,9 @@ class TenantPaymentLogUsecase {
         notes: data.notes || null,
         billing_type: data.billing_type || null,
         billing_period: data.billing_period, // Mandatory
-        billing_amount: data.billing_amount, // Mandatory
+        billing_amount: billingFields.billing_amount,
+        ppn: billingFields.ppn,
+        ppn_percent: billingFields.ppn_percent,
         outstanding: data.outstanding || null,
         overdue: data.overdue || null,
         rate: data.rate !== undefined ? data.rate : 0.01,
@@ -111,6 +116,26 @@ class TenantPaymentLogUsecase {
             // jangan di-null otomatis agar update rate/penagihan saat unpaid tetap tersimpan.
           }
         }
+      }
+
+      const billingPatchKeys = ['amount', 'ppn_percent', 'ppn', 'billing_amount'];
+      const touchesBilling = billingPatchKeys.some((k) => updateData[k] !== undefined);
+      if (touchesBilling) {
+        const merged = {
+          amount: updateData.amount !== undefined ? updateData.amount : paymentLog.amount,
+          ppn_percent:
+            updateData.ppn_percent !== undefined ? updateData.ppn_percent : paymentLog.ppn_percent,
+          ppn: updateData.ppn !== undefined ? updateData.ppn : paymentLog.ppn,
+          billing_amount:
+            updateData.billing_amount !== undefined
+              ? updateData.billing_amount
+              : paymentLog.billing_amount,
+        };
+        const billingFields = normalizePaymentBillingFields(merged);
+        updateData.amount = billingFields.amount;
+        updateData.ppn_percent = billingFields.ppn_percent;
+        updateData.ppn = billingFields.ppn;
+        updateData.billing_amount = billingFields.billing_amount;
       }
 
       // Update payment log

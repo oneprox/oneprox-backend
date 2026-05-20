@@ -76,7 +76,17 @@ TenantPaymentLog.init({
   billing_amount: {
     type: DataTypes.FLOAT,
     allowNull: true,
-    comment: 'Jumlah tagihan'
+    comment: 'Total tagihan (amount + ppn)'
+  },
+  ppn: {
+    type: DataTypes.FLOAT,
+    allowNull: true,
+    comment: 'Nilai PPN (Rp) = amount * ppn_percent',
+  },
+  ppn_percent: {
+    type: DataTypes.FLOAT,
+    allowNull: true,
+    comment: 'Persentase PPN sebagai fraksi desimal (0.11 = 11%)',
   },
   outstanding: {
     type: DataTypes.FLOAT,

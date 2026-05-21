@@ -449,20 +449,20 @@ class TenantUseCase {
       const unit = await this.unitRepository.findById(unitId, ctx);
       const unitName = unit?.name || unitId;
 
-      const otherActiveTenantId = await this.tenantUnitRepository.findActiveTenantIdByUnitId(
+      const otherHoldingTenantId = await this.tenantUnitRepository.findHoldingTenantIdByUnitId(
         unitId,
         tenantId
       );
-      if (otherActiveTenantId) {
+      if (otherHoldingTenantId) {
         let otherName = '';
         try {
-          const otherTenant = await this.tenantRepository.findById(otherActiveTenantId, ctx);
+          const otherTenant = await this.tenantRepository.findById(otherHoldingTenantId, ctx);
           otherName = otherTenant?.name ? ` (${otherTenant.name})` : '';
         } catch (_) {
           /* ignore */
         }
         unitIssues.push(
-          `Unit "${unitName}" masih digunakan tenant aktif lain${otherName}`
+          `Unit "${unitName}" masih dipakai tenant lain${otherName}`
         );
         continue;
       }
@@ -476,10 +476,14 @@ class TenantUseCase {
       if (typeof statusInt === 'string') {
         statusInt = UnitStatusStrToInt[statusInt];
       }
-      if (statusInt !== UnitStatusStrToInt.available) {
+      const allowedStatuses = [
+        UnitStatusStrToInt.available,
+        UnitStatusStrToInt.reserved,
+      ];
+      if (!allowedStatuses.includes(statusInt)) {
         const statusLabel = UnitStatusIntToStr[statusInt] || 'occupied';
         unitIssues.push(
-          `Unit "${unitName}" masih berstatus ${statusLabel} (belum available)`
+          `Unit "${unitName}" masih berstatus ${statusLabel} (belum available/reserved)`
         );
       }
     }
@@ -539,16 +543,27 @@ class TenantUseCase {
     throw err;
   }
 
+  /** Tenant yang masih menahan unit (belum dilepas ke pool available). */
+  isTenantStatusHoldingUnits(status) {
+    const statusInt = this.resolveTenantStatusInt(status);
+    if (statusInt === undefined) return false;
+    // inactive(0), terminated(4), blacklisted(5) melepaskan unit
+    return [1, 2, 3].includes(statusInt); // active, pending, expired
+  }
+
   /**
-   * Unit hanya status occupied jika tenant aktif; selain itu available agar tenant lain bisa pakai.
+   * Unit ditandai reserved (pending) atau occupied (active/expired);
+   * hanya inactive/terminated/blacklisted yang mengembalikan unit ke available.
    */
   async syncTenantUnitOccupancy(tenantId, tenantStatus, ctx, transaction = null) {
     const statusInt = this.resolveTenantStatusInt(tenantStatus);
     if (statusInt === undefined) return;
 
-    if (this.isTenantStatusActive(statusInt)) {
-      await this.validateResourcesAvailableForActivation(tenantId, ctx);
-      await this.occupyUnitsForTenant(tenantId, ctx, transaction);
+    if (this.isTenantStatusHoldingUnits(statusInt)) {
+      if (this.isTenantStatusActive(statusInt)) {
+        await this.validateResourcesAvailableForActivation(tenantId, ctx);
+      }
+      await this.holdUnitsForTenant(tenantId, statusInt, ctx, transaction);
     } else {
       await this.releaseUnitsForTenant(tenantId, ctx, transaction);
     }
@@ -580,10 +595,12 @@ class TenantUseCase {
     }
   }
 
-  async occupyUnitsForTenant(tenantId, ctx, transaction = null) {
+  async holdUnitsForTenant(tenantId, tenantStatusInt, ctx, transaction = null) {
     const { UnitStatusStrToInt } = require('../models/Unit');
     const tenantUnits = await this.tenantUnitRepository.getByTenantID(tenantId);
     const updateCtx = transaction ? { ...ctx, transaction } : ctx;
+    const unitStatus =
+      tenantStatusInt === 2 ? UnitStatusStrToInt.reserved : UnitStatusStrToInt.occupied;
 
     for (const tu of tenantUnits) {
       const unitId = tu.unit_id || tu.get?.('unit_id') || tu.toJSON?.()?.unit_id;
@@ -592,7 +609,7 @@ class TenantUseCase {
       await this.unitRepository.update(
         unitId,
         {
-          status: UnitStatusStrToInt.occupied,
+          status: unitStatus,
           updated_by: ctx.userId,
         },
         updateCtx
@@ -605,10 +622,20 @@ class TenantUseCase {
 
     for (let i = 0; i < data.length; i++) {
       const unitId = data[i];
-      const activeTenantId = await this.tenantUnitRepository.findActiveTenantIdByUnitId(unitId);
-      if (activeTenantId) {
+      const holdingTenantId = await this.tenantUnitRepository.findHoldingTenantIdByUnitId(
+        unitId,
+        tenant.id
+      );
+      if (holdingTenantId) {
+        let otherName = '';
+        try {
+          const otherTenant = await this.tenantRepository.findById(holdingTenantId, ctx);
+          otherName = otherTenant?.name ? ` (${otherTenant.name})` : '';
+        } catch (_) {
+          /* ignore */
+        }
         throw new Error(
-          'Unit yang dipilih masih digunakan tenant aktif lain. Nonaktifkan tenant tersebut atau pilih unit lain.'
+          `Unit masih dipakai tenant lain${otherName}. Nonaktifkan/akhiri tenant tersebut atau pilih unit lain.`
         );
       }
 

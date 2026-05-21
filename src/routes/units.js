@@ -43,7 +43,9 @@ function InitUnitRouter(UnitUsecase) {
   );
 
   router.get('/', [
-    query('status').optional().isIn(['available', 'occupied', 'maintenance', 'reserved', 'inactive', 'out_of_order', '0', '1', '2', '3', '4', '5']).withMessage('status must be one of: available, occupied, maintenance, reserved, inactive, out_of_order, or 0, 1, 2, 3, 4, 5')
+    query('status').optional().isIn(['available', 'occupied', 'maintenance', 'reserved', 'inactive', 'out_of_order', '0', '1', '2', '3', '4', '5']).withMessage('status must be one of: available, occupied, maintenance, reserved, inactive, out_of_order, or 0, 1, 2, 3, 4, 5'),
+    query('assignable').optional().isIn(['1', 'true', '0', 'false']).withMessage('assignable must be 1, true, 0, or false'),
+    query('for_tenant_id').optional().isUUID().withMessage('for_tenant_id must be a valid UUID'),
   ], async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {

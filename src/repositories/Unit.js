@@ -101,8 +101,20 @@ class UnitRepository {
       filter.is_deleted = false;
     }
     
-    if (filter.asset_id || filter.name || filter.is_toilet_exist || filter.status || filter.is_deleted !== undefined) {
-      whereQuery.where = {};
+    const assignable =
+      filter.assignable === true ||
+      filter.assignable === '1' ||
+      filter.assignable === 'true';
+
+    if (
+      filter.asset_id ||
+      filter.name ||
+      filter.is_toilet_exist ||
+      filter.status ||
+      filter.is_deleted !== undefined ||
+      assignable
+    ) {
+      whereQuery.where = whereQuery.where || {};
       if (filter.asset_id) {
         whereQuery.where.asset_id = filter.asset_id;
       }
@@ -137,6 +149,31 @@ class UnitRepository {
           }
         }
         whereQuery.where.status = statusInt;
+      }
+    }
+
+    if (assignable) {
+      const { QueryTypes } = require('sequelize');
+      const replacements = {};
+      let excludeSql = '';
+      if (filter.for_tenant_id) {
+        excludeSql = 'AND t.id != :forTenantId';
+        replacements.forTenantId = filter.for_tenant_id;
+      }
+      const heldRows = await this.unitModel.sequelize.query(
+        `
+        SELECT DISTINCT tu.unit_id AS unit_id
+        FROM tenant_units tu
+        INNER JOIN tenants t ON t.id = tu.tenant_id
+        WHERE t.status NOT IN (0, 4, 5)
+        ${excludeSql}
+        `,
+        { replacements, type: QueryTypes.SELECT }
+      );
+      const heldIds = heldRows.map((r) => r.unit_id).filter(Boolean);
+      if (!whereQuery.where) whereQuery.where = {};
+      if (heldIds.length > 0) {
+        whereQuery.where.id = { [Op.notIn]: heldIds };
       }
     }
 

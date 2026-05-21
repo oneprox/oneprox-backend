@@ -1026,8 +1026,57 @@ class UserTaskRepository {
         
         // Get current day and time in Asia/Jakarta timezone
         const now = moment().tz('Asia/Jakarta');
-        const currentDay = now.day(); // 0 = Sunday, 1 = Monday, etc.
-        const currentDayNumber = currentDay.toString(); // Convert to string to match varchar in database (0-6 or 'all')
+        const currentDay = now.day(); // 0 = Sunday, 1 = Monday, etc. (Asia/Jakarta)
+        const currentDayNumber = String(currentDay);
+        // Kolom day_of_week = varchar di PostgreSQL — hanya bandingkan string
+        const scheduleForTodayWhere = {
+          [Op.or]: [
+            { day_of_week: 'all' },
+            { day_of_week: currentDayNumber },
+          ],
+        };
+        const scheduleMatchesToday = (dayOfWeek) => {
+          if (dayOfWeek === undefined || dayOfWeek === null || dayOfWeek === '') {
+            return false;
+          }
+          const normalized = String(dayOfWeek).trim().toLowerCase();
+          if (normalized === 'all') return true;
+          const asNum = Number(normalized);
+          if (!Number.isNaN(asNum) && asNum === currentDay) return true;
+          return normalized === currentDayNumber;
+        };
+        const filterSchedulesForToday = (schedules) =>
+          (schedules || [])
+            .map((s) => (s.toJSON ? s.toJSON() : s))
+            .filter((s) => scheduleMatchesToday(s.day_of_week));
+        const resolveSchedulesForGeneration = async (taskId, loadedSchedules) => {
+          let filtered = filterSchedulesForToday(loadedSchedules);
+          if (filtered.length > 0) {
+            return { qualifies: true, schedules: filtered };
+          }
+          const allRows = await this.taskScheduleModel.findAll({
+            where: { task_id: taskId },
+            transaction: t,
+          });
+          filtered = filterSchedulesForToday(allRows);
+          if (filtered.length > 0) {
+            return { qualifies: true, schedules: filtered };
+          }
+          if (allRows.length > 0) {
+            return { qualifies: false, schedules: [] };
+          }
+          return { qualifies: true, schedules: [] };
+        };
+        const childShouldGenerateWithParent = async (childTaskId, childTaskJson) => {
+          const fromInclude = filterSchedulesForToday(childTaskJson?.schedules);
+          if (fromInclude.length > 0) return true;
+          const allRows = await this.taskScheduleModel.findAll({
+            where: { task_id: childTaskId },
+            transaction: t,
+          });
+          if (filterSchedulesForToday(allRows).length > 0) return true;
+          return allRows.length === 0;
+        };
         const currentTime = now.format('HH:mm');
         
         ctx.log?.info({ 
@@ -1208,9 +1257,8 @@ class UserTaskRepository {
           taskWhereClause
         }, 'Task where clause with role filter');
         
-        // First, get all main tasks that belong to matching task groups AND match user's role (regardless of schedules)
-        // This ensures main tasks are included even if they don't have schedules
-        // Get schedules that match current day OR are 'all' - we need ALL matching schedules, not just one
+        // Main tasks di task group yang cocok jam + role + aset; jadwal di-attach hanya hari ini / 'all'
+        // Task yang jadwalnya hanya hari lain akan punya schedules=[] dan di-skip di loop
         const allMainTasks = await this.taskModel.findAll({
           where: {
             ...taskWhereClause,
@@ -1220,13 +1268,8 @@ class UserTaskRepository {
             {
               model: this.taskScheduleModel,
               as: 'schedules',
-              where: {
-                [Op.or]: [
-                  { day_of_week: 'all' },
-                  { day_of_week: currentDayNumber }
-                ]
-              },
-              required: false // Make schedules optional - include main tasks even without schedules
+              where: scheduleForTodayWhere,
+              required: false // Parent tetap di-load; jadwal hari lain tidak di-attach (schedules kosong)
               // This will get ALL schedules that match today or are 'all', so a task with multiple times will get all of them
             }
           ],
@@ -1272,8 +1315,7 @@ class UserTaskRepository {
           });
         }
 
-        // Include ALL main tasks from matching task groups
-        // Schedules determine when to create user tasks, not whether to create them
+        // Hanya main task yang memang untuk hari ini (atau tanpa baris jadwal sama sekali)
         const tasks = allMainTasks;
         
         ctx.log?.info({ 
@@ -1321,13 +1363,8 @@ class UserTaskRepository {
                 {
                   model: this.taskScheduleModel,
                   as: 'schedules',
-                  where: {
-                    [Op.or]: [
-                      { day_of_week: 'all' },
-                      { day_of_week: currentDayNumber }
-                    ]
-                  },
-                  required: false // Make schedules optional for child tasks
+                  where: scheduleForTodayWhere,
+                  required: false
                 }
               ],
               transaction: t
@@ -1373,26 +1410,22 @@ class UserTaskRepository {
         
         for (const task of tasks) {
           const taskJson = task.toJSON();
-          let taskSchedules = task.schedules || [];
-          
-          // If schedules are empty, try to reload them
-          if (taskSchedules.length === 0 && this.taskScheduleModel) {
-            const reloadedSchedules = await this.taskScheduleModel.findAll({
-              where: {
-                task_id: task.id,
-                [Op.or]: [
-                  { day_of_week: 'all' },
-                  { day_of_week: currentDayNumber }
-                ]
+          const { qualifies, schedules: taskSchedules } = await resolveSchedulesForGeneration(
+            task.id,
+            task.schedules
+          );
+
+          if (!qualifies) {
+            ctx.log?.info(
+              {
+                taskId: task.id,
+                taskName: taskJson.name,
+                currentDay,
+                currentDayNumber,
               },
-              transaction: t
-            });
-            taskSchedules = reloadedSchedules.map(s => s.toJSON ? s.toJSON() : s);
-            ctx.log?.info({ 
-              taskId: task.id,
-              reloadedSchedulesCount: taskSchedules.length,
-              schedules: taskSchedules.map(s => ({ day_of_week: s.day_of_week, time: s.time }))
-            }, 'Reloaded schedules for task');
+              'Skipping task: schedules exist but none match today (WIB)'
+            );
+            continue;
           }
           
           ctx.log?.info({ 
@@ -1418,8 +1451,8 @@ class UserTaskRepository {
             }, 'Found child tasks for main task');
           }
           
-          // If task has schedules, collect user task data for each schedule
-          // If task has no schedules (e.g., child task without own schedules), collect one user task anyway
+          // Jadwal hari ini: satu user_task per slot waktu
+          // Tanpa baris task_schedules sama sekali: satu user_task (legacy)
           if (taskSchedules.length > 0) {
             ctx.log?.info({ 
               taskId: task.id,
@@ -1433,6 +1466,17 @@ class UserTaskRepository {
             
             for (const schedule of taskSchedules) {
               const scheduleJson = schedule.toJSON ? schedule.toJSON() : schedule;
+              if (!scheduleMatchesToday(scheduleJson.day_of_week)) {
+                ctx.log?.info(
+                  {
+                    taskId: task.id,
+                    dayOfWeek: scheduleJson.day_of_week,
+                    currentDayNumber,
+                  },
+                  'Skipping schedule row: not today'
+                );
+                continue;
+              }
               const scheduleTime = scheduleJson.time || null;
               
               ctx.log?.info({ 
@@ -1495,6 +1539,22 @@ class UserTaskRepository {
                 const childTaskJson = childTask ? childTask.toJSON() : null;
                 
                 if (childTaskJson) {
+                  const includeChild = await childShouldGenerateWithParent(
+                    childTaskId,
+                    childTaskJson
+                  );
+                  if (!includeChild) {
+                    ctx.log?.info(
+                      {
+                        childTaskId,
+                        parentTaskId: task.id,
+                        currentDayNumber,
+                      },
+                      'Skipping child task: schedules only on other days'
+                    );
+                    continue;
+                  }
+
                   // Find the task group for the child task
                   const childTaskGroup = matchingTaskGroups.find(tg => tg.id === childTaskJson.task_group_id);
                   const childTaskGroupJson = childTaskGroup ? childTaskGroup.toJSON() : null;
@@ -1539,13 +1599,13 @@ class UserTaskRepository {
               userTaskDataToCreate.push(mainTaskItem);
             }
           } else {
-            // Task has no schedules - collect user task data anyway
+            // Tidak ada baris jadwal di DB — generate sekali tanpa time
             ctx.log?.info({ 
               taskId: task.id,
               taskName: taskJson.name,
               isMainTask: taskJson.is_main_task,
               childTaskIdsCount: childTaskIds.length
-            }, 'Processing task without schedules');
+            }, 'Processing task with no schedule rows in database');
             
             const taskGroup = matchingTaskGroups.find(tg => tg.id === taskJson.task_group_id);
             const taskGroupJson = taskGroup ? taskGroup.toJSON() : null;
@@ -1599,6 +1659,22 @@ class UserTaskRepository {
               const childTaskJson = childTask ? childTask.toJSON() : null;
               
               if (childTaskJson) {
+                const includeChild = await childShouldGenerateWithParent(
+                  childTaskId,
+                  childTaskJson
+                );
+                if (!includeChild) {
+                  ctx.log?.info(
+                    {
+                      childTaskId,
+                      parentTaskId: task.id,
+                      currentDayNumber,
+                    },
+                    'Skipping child task: schedules only on other days'
+                  );
+                  continue;
+                }
+
                 // Find the task group for the child task
                 const childTaskGroup = matchingTaskGroups.find(tg => tg.id === childTaskJson.task_group_id);
                 const childTaskGroupJson = childTaskGroup ? childTaskGroup.toJSON() : null;

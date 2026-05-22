@@ -21,6 +21,8 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
       body('asset_ids').optional().isArray(),
       body('payment_term').optional().isInt({ min: 0, max: 1 }).withMessage('payment_term must be 0 (year) or 1 (month)'),
       body('rent_price').optional().isFloat(),
+      body('ppn').optional().isFloat({ min: 0 }).withMessage('ppn must be a number >= 0'),
+      body('total_price').optional().isFloat({ min: 0 }).withMessage('total_price must be a number >= 0'),
       body('building_area').optional().isFloat({ min: 0 }).withMessage('building_area must be a positive number'),
       body('land_area').optional().isFloat({ min: 0 }).withMessage('land_area must be a positive number'),
       body('electricity_power').optional().isFloat({ min: 0 }).withMessage('electricity_power must be a positive number'),
@@ -68,6 +70,7 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
         building_type,
         payment_term,
         rent_price,
+        ppn,
         building_area,
         land_area,
         electricity_power,
@@ -82,7 +85,7 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
       console.log("TenantRouter.createTenant - extracted new_user:", new_user);
 
       const tenant = await TenantUseCase.createTenant({
-        name, tenant_identifications, contract_documents, contract_begin_at, contract_end_at, unit_ids, asset_ids, building_type, payment_term, rent_price, building_area, land_area, electricity_power, user_id, new_user, category, sub_category, status, createdBy: req.auth.userId
+        name, tenant_identifications, contract_documents, contract_begin_at, contract_end_at, unit_ids, asset_ids, building_type, payment_term, rent_price, ppn, building_area, land_area, electricity_power, user_id, new_user, category, sub_category, status, createdBy: req.auth.userId
       }, {userId: req.auth.userId, log: req.log});
       res.status(201).json(createResponse(tenant, "success", 201));
     } catch (err) {

@@ -126,6 +126,12 @@ class TenantUseCase {
           rent_duration_unit: rentDurationUnitInt
         }, "TenantUsecase.createTenant - calculated rent duration");
         
+        const { normalizeTenantPricing } = require('../utils/tenantPricing');
+        const pricing = normalizeTenantPricing({
+          rent_price: data.rent_price,
+          ppn: data.ppn,
+        });
+
         const createTenantData = {
           user_id: data.user_id,
           name: data.name,
@@ -136,7 +142,9 @@ class TenantUseCase {
           rent_duration: rentDuration,
           rent_duration_unit: rentDurationUnitInt,
           payment_term: data.payment_term !== undefined ? data.payment_term : null,
-          rent_price: data.rent_price || null,
+          rent_price: pricing.rent_price || null,
+          ppn: pricing.ppn,
+          total_price: pricing.total_price,
           down_payment: null, // Removed field
           deposit: null, // Removed field
           building_area: data.building_area || null,
@@ -187,6 +195,8 @@ class TenantUseCase {
             rent_duration: tenant.rent_duration,
             rent_duration_unit: DurationUnitStr[tenant.rent_duration_unit], // Convert back to string for log
             rent_price: tenant.rent_price,
+            ppn: tenant.ppn,
+            total_price: tenant.total_price,
             category: data.category || null,
             sub_category: data.sub_category || null,
           },
@@ -911,7 +921,24 @@ class TenantUseCase {
         await this.validateResourcesAvailableForActivation(id, ctx);
       }
 
-      const updatedTenant = await this.tenantRepository.update(id, data);
+      const updatePayload = { ...data };
+      if (data.ppn !== undefined || data.rent_price !== undefined) {
+        const { normalizeTenantPricing } = require('../utils/tenantPricing');
+        const pricing = normalizeTenantPricing(
+          {
+            rent_price: data.rent_price,
+            ppn: data.ppn,
+          },
+          oldTenant.rent_price
+        );
+        updatePayload.ppn = pricing.ppn;
+        updatePayload.total_price = pricing.total_price;
+        if (data.rent_price !== undefined) {
+          updatePayload.rent_price = pricing.rent_price;
+        }
+      }
+
+      const updatedTenant = await this.tenantRepository.update(id, updatePayload);
 
       if (
         data.status !== undefined &&

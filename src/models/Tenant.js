@@ -66,6 +66,17 @@ Tenant.init({
     type: DataTypes.FLOAT,
     allowNull: true,
   },
+  ppn: {
+    type: DataTypes.FLOAT,
+    allowNull: true,
+    defaultValue: 0,
+    comment: 'PPN kontrak (Rp), input manual',
+  },
+  total_price: {
+    type: DataTypes.FLOAT,
+    allowNull: true,
+    comment: 'Total harga kontrak = rent_price + ppn',
+  },
   down_payment: {
     type: DataTypes.FLOAT,
     allowNull: true,

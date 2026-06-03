@@ -13,10 +13,12 @@ class TenantUnitRepository {
     }
   }
 
-  async getByTenantID(id) {
-    return this.tenantUnitModel.findAll({
-      where: { tenant_id: id }
-    })
+  async getByTenantID(id, transaction = null) {
+    const options = { where: { tenant_id: id } };
+    if (transaction) {
+      options.transaction = transaction;
+    }
+    return this.tenantUnitModel.findAll(options);
   }
 
   /**

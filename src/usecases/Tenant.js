@@ -152,7 +152,7 @@ class TenantUseCase {
           electricity_power: data.electricity_power || null,
           category_id: categoryId,
           sub_category: data.sub_category && typeof data.sub_category === 'string' ? data.sub_category.trim() : null,
-          status: this.getTenantStatusInt(data.status) || 2, // Default to pending (2) if not provided
+          status: this.getTenantStatusInt(data.status) ?? 1, // Default to active (1)
         };
         const tenant = await this.tenantRepository.create(
           createTenantData,
@@ -443,15 +443,16 @@ class TenantUseCase {
   /**
    * Pastikan unit/asset siap sebelum tenant diaktifkan (status available, tidak dipakai tenant aktif lain).
    */
-  async validateResourcesAvailableForActivation(tenantId, ctx) {
+  async validateResourcesAvailableForActivation(tenantId, ctx, transaction = null) {
     const { UnitStatusStrToInt, UnitStatusIntToStr } = require('../models/Unit');
     const { QueryTypes } = require('sequelize');
     const sequelizeInstance = this.tenantUnitRepository.tenantUnitModel.sequelize;
+    const tx = transaction || ctx.transaction || null;
 
     const unitIssues = [];
     const assetIssues = [];
 
-    const tenantUnits = await this.tenantUnitRepository.getByTenantID(tenantId);
+    const tenantUnits = await this.tenantUnitRepository.getByTenantID(tenantId, tx);
     for (const tu of tenantUnits) {
       const unitId = tu.unit_id || tu.get?.('unit_id') || tu.toJSON?.()?.unit_id;
       if (!unitId) continue;
@@ -571,7 +572,7 @@ class TenantUseCase {
 
     if (this.isTenantStatusHoldingUnits(statusInt)) {
       if (this.isTenantStatusActive(statusInt)) {
-        await this.validateResourcesAvailableForActivation(tenantId, ctx);
+        await this.validateResourcesAvailableForActivation(tenantId, ctx, transaction);
       }
       await this.holdUnitsForTenant(tenantId, statusInt, ctx, transaction);
     } else {
@@ -581,7 +582,8 @@ class TenantUseCase {
 
   async releaseUnitsForTenant(tenantId, ctx, transaction = null) {
     const { UnitStatusStrToInt } = require('../models/Unit');
-    const tenantUnits = await this.tenantUnitRepository.getByTenantID(tenantId);
+    const tx = transaction || ctx.transaction || null;
+    const tenantUnits = await this.tenantUnitRepository.getByTenantID(tenantId, tx);
     const updateCtx = transaction ? { ...ctx, transaction } : ctx;
 
     for (const tu of tenantUnits) {
@@ -607,7 +609,8 @@ class TenantUseCase {
 
   async holdUnitsForTenant(tenantId, tenantStatusInt, ctx, transaction = null) {
     const { UnitStatusStrToInt } = require('../models/Unit');
-    const tenantUnits = await this.tenantUnitRepository.getByTenantID(tenantId);
+    const tx = transaction || ctx.transaction || null;
+    const tenantUnits = await this.tenantUnitRepository.getByTenantID(tenantId, tx);
     const updateCtx = transaction ? { ...ctx, transaction } : ctx;
     const unitStatus =
       tenantStatusInt === 2 ? UnitStatusStrToInt.reserved : UnitStatusStrToInt.occupied;
@@ -1042,15 +1045,11 @@ class TenantUseCase {
 
       await this.tenantLogRepository.create(tenantLog, { ...ctx, transaction });
       
-      // Get tenant units before deleting to update their status
-      const tenantUnits = await this.tenantUnitRepository.getByTenantID(id);
-      
-      // Delete related data first
-      // Delete tenant units
-      await this.tenantUnitRepository.deleteByTenantId(id, { ...ctx, transaction });
-      
-      // Bebaskan unit jika tidak ada tenant aktif lain yang memakai
+      // Bebaskan unit sebelum hapus relasi tenant_units (release butuh baris tenant_units)
       await this.releaseUnitsForTenant(id, { ...ctx, transaction });
+
+      // Delete related data first
+      await this.tenantUnitRepository.deleteByTenantId(id, { ...ctx, transaction });
       
       // Delete tenant attachments
       await this.tenantAttachmentRepository.deleteByTenantId(id, { ...ctx, transaction });

@@ -2,7 +2,9 @@ const { Router } = require("express");
 const { body, validationResult, param, query } = require("express-validator");
 const { authMiddleware, ensureRole } = require("../middleware/auth");
 const { createResponse } = require("../services/response");
-const uploadUserTaskEvidenceMiddleware = require("../middleware/uploadUserTaskEvidence");
+const {
+  optionalUploadUserTaskEvidence,
+} = require("../middleware/uploadUserTaskEvidence");
 const { compressUploadedImages } = require("../middleware/imageCompressor");
 
 function InitUserTaskRouter(userTaskUsecase) {
@@ -192,6 +194,26 @@ function InitUserTaskRouter(userTaskUsecase) {
       // Process files and create evidence data
       const evidences = [];
       const host = req.protocol + '://' + req.get('host');
+
+      // Bukti dari JSON (upload per file terpisah di frontend)
+      let bodyEvidences = req.body.evidences;
+      if (typeof bodyEvidences === 'string' && bodyEvidences.trim()) {
+        try {
+          bodyEvidences = JSON.parse(bodyEvidences);
+        } catch {
+          bodyEvidences = null;
+        }
+      }
+      if (Array.isArray(bodyEvidences)) {
+        for (const ev of bodyEvidences) {
+          if (ev && typeof ev.url === 'string' && ev.url.trim()) {
+            evidences.push({
+              url: ev.url.trim(),
+              type: ev.type || 'after',
+            });
+          }
+        }
+      }
       
       if (req.files) {
         // Handle file_before (for validation)
@@ -337,6 +359,9 @@ function InitUserTaskRouter(userTaskUsecase) {
   const completeUserTaskParam = [
     param("id").isInt().notEmpty(),
     body("notes").isString().optional(),
+    body("evidences").optional().isArray().withMessage("evidences must be an array"),
+    body("evidences.*.url").optional().isString().notEmpty(),
+    body("evidences.*.type").optional().isString(),
     body("evidence").optional().custom((value) => {
       // Allow single URL string or array of URL strings
       if (Array.isArray(value)) {
@@ -450,7 +475,13 @@ function InitUserTaskRouter(userTaskUsecase) {
   router.get("/:id", getUserTaskByIdParam, getUserTaskById);
   router.get("/", getUserTasksParam, getUserTasks);
   router.put("/:id/start", startUserTaskParam, startUserTask);
-  router.put("/:id/complete", uploadUserTaskEvidenceMiddleware(), compressUploadedImages, completeUserTaskParam, completeUserTask);
+  router.put(
+    "/:id/complete",
+    optionalUploadUserTaskEvidence,
+    compressUploadedImages,
+    completeUserTaskParam,
+    completeUserTask
+  );
 
   return router;
 }

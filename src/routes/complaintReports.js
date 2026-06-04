@@ -6,6 +6,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { compressUploadedImages } = require('../middleware/imageCompressor');
+const { UPLOAD_MAX_FILE_BYTES } = require('../config/uploadLimits');
 
 function InitComplaintReportRouter(complaintReportUsecase) {
   const router = Router();
@@ -28,7 +29,7 @@ function InitComplaintReportRouter(complaintReportUsecase) {
 
   const upload = multer({ 
     storage: storage,
-    limits: { fileSize: 5 * 1024 * 1024 } // 5MB
+    limits: { fileSize: UPLOAD_MAX_FILE_BYTES },
   });
 
   const createComplaintReportParam = [

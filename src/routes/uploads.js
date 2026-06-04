@@ -5,6 +5,10 @@ const path = require('path');
 const fs = require('fs');
 const { compressUploadedImages } = require('../middleware/imageCompressor');
 const { getUploadUrl } = require('../services/baseUrl');
+const {
+  UPLOAD_MAX_FILE_BYTES,
+  UPLOAD_MAX_FILE_MB,
+} = require('../config/uploadLimits');
 
 function InitUploadRouter() {
   const router = Router();
@@ -24,10 +28,9 @@ function InitUploadRouter() {
     }
   });
 
-  const maxUploadBytes = Number(process.env.UPLOAD_MAX_FILE_BYTES) || 25 * 1024 * 1024;
   const upload = multer({
     storage: storage,
-    limits: { fileSize: maxUploadBytes },
+    limits: { fileSize: UPLOAD_MAX_FILE_BYTES },
   });
 
   function singleFile(fieldName) {
@@ -35,8 +38,7 @@ function InitUploadRouter() {
       upload.single(fieldName)(req, res, (err) => {
         if (err instanceof multer.MulterError) {
           if (err.code === 'LIMIT_FILE_SIZE') {
-            const mb = Math.max(1, Math.round(maxUploadBytes / (1024 * 1024)));
-            return res.status(413).json({ error: `File exceeds the ${mb}MB upload limit` });
+            return res.status(413).json({ error: `File exceeds the ${UPLOAD_MAX_FILE_MB}MB upload limit` });
           }
           return res.status(400).json({ error: err.message });
         }

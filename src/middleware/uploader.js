@@ -2,6 +2,10 @@ const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
 const { compressUploadedImages } = require("./imageCompressor");
+const {
+  UPLOAD_MAX_FILE_BYTES,
+  UPLOAD_MAX_FILE_MB,
+} = require("../config/uploadLimits");
 
 function uploadMiddleware(req, res, next) {
   const storage = multer.diskStorage({
@@ -22,7 +26,7 @@ function uploadMiddleware(req, res, next) {
 
   const upload = multer({
     storage,
-    limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
+    limits: { fileSize: UPLOAD_MAX_FILE_BYTES },
   });
 
   const uploadHandler = upload.fields([
@@ -38,7 +42,7 @@ function uploadMiddleware(req, res, next) {
       if (err.code === "LIMIT_FILE_SIZE") {
         return res
           .status(413)
-          .json({ error: "One or more files exceed the 5MB size limit" });
+          .json({ error: `One or more files exceed the ${UPLOAD_MAX_FILE_MB}MB size limit` });
       }
       return res.status(400).json({ error: err.message });
     } else if (err) {

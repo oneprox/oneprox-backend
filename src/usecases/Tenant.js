@@ -630,6 +630,107 @@ class TenantUseCase {
     }
   }
 
+  calculateRentDurationFromContract(contractBeginAt, contractEndAt) {
+    const contractBegin = moment(contractBeginAt);
+    const contractEnd = moment(contractEndAt);
+    const durationInMonths = contractEnd.diff(contractBegin, 'months', true);
+    const durationInYears = contractEnd.diff(contractBegin, 'years', true);
+
+    if (durationInYears >= 1) {
+      return {
+        rent_duration: Math.max(1, Math.round(durationInYears)),
+        rent_duration_unit: DurationUnit.year,
+      };
+    }
+    return {
+      rent_duration: Math.round(durationInMonths),
+      rent_duration_unit: DurationUnit.month,
+    };
+  }
+
+  async resolveCategoryId(categoryName, ctx, transaction) {
+    if (!categoryName || typeof categoryName !== 'string' || !categoryName.trim()) {
+      return null;
+    }
+    let category = await this.tenantCategoryRepo.findByName(categoryName.trim(), ctx);
+    if (!category) {
+      category = await this.tenantCategoryRepo.create(
+        {
+          name: categoryName.trim(),
+          created_by: ctx.userId,
+          updated_by: ctx.userId,
+        },
+        ctx,
+        transaction
+      );
+    }
+    return category.id;
+  }
+
+  async replaceTenantUnits(tenantId, unitIds, tenantStatus, ctx, transaction) {
+    const txCtx = { ...ctx, transaction };
+    await this.releaseUnitsForTenant(tenantId, txCtx, transaction);
+    await this.tenantUnitRepository.deleteByTenantId(tenantId, txCtx);
+
+    if (!Array.isArray(unitIds) || unitIds.length === 0) {
+      return;
+    }
+
+    for (const unitId of unitIds) {
+      const holdingTenantId = await this.tenantUnitRepository.findHoldingTenantIdByUnitId(
+        unitId,
+        tenantId
+      );
+      if (holdingTenantId) {
+        let otherName = '';
+        try {
+          const otherTenant = await this.tenantRepository.findById(holdingTenantId, ctx);
+          otherName = otherTenant?.name ? ` (${otherTenant.name})` : '';
+        } catch (_) {
+          /* ignore */
+        }
+        throw new Error(
+          `Unit masih dipakai tenant lain${otherName}. Nonaktifkan/akhiri tenant tersebut atau pilih unit lain.`
+        );
+      }
+
+      await this.tenantUnitRepository.create(
+        { tenant_id: tenantId, unit_id: unitId },
+        transaction,
+        ctx
+      );
+    }
+
+    await this.syncTenantUnitOccupancy(tenantId, tenantStatus, ctx, transaction);
+  }
+
+  async replaceTenantAssets(tenantId, assetIds, ctx, transaction) {
+    const txCtx = { ...ctx, transaction };
+    await this.tenantAssetRepository.deleteByTenantId(tenantId, txCtx);
+
+    if (!Array.isArray(assetIds) || assetIds.length === 0) {
+      return;
+    }
+
+    for (const assetId of assetIds) {
+      const activeTenantId = await this.tenantAssetRepository.findActiveTenantIdByAssetId(
+        assetId,
+        tenantId
+      );
+      if (activeTenantId) {
+        throw new Error(
+          'Asset yang dipilih masih digunakan tenant aktif lain. Nonaktifkan tenant tersebut atau pilih asset lain.'
+        );
+      }
+
+      await this.tenantAssetRepository.create(
+        { tenant_id: tenantId, asset_id: assetId },
+        transaction,
+        ctx
+      );
+    }
+  }
+
   async saveTenantUnits(tenant, data, t, ctx) {
     ctx.log?.info({ unit_ids: data }, "TenantUsecase.saveTenantUnits");
 
@@ -670,7 +771,10 @@ class TenantUseCase {
 
     for (let i = 0; i < data.length; i++) {
       const assetId = data[i];
-      const activeTenantId = await this.tenantAssetRepository.findActiveTenantIdByAssetId(assetId);
+      const activeTenantId = await this.tenantAssetRepository.findActiveTenantIdByAssetId(
+        assetId,
+        tenant.id
+      );
       if (activeTenantId) {
         throw new Error(
           'Asset yang dipilih masih digunakan tenant aktif lain. Nonaktifkan tenant tersebut atau pilih asset lain.'
@@ -805,6 +909,13 @@ class TenantUseCase {
           tenant.units = units;
         }
 
+        const tenantAssets = await this.tenantAssetRepository.getByTenantID(tenant.id);
+        if (tenantAssets.length > 0) {
+          tenant.asset_ids = tenantAssets
+            .map((ta) => ta.asset_id || ta.get?.('asset_id') || ta.toJSON?.()?.asset_id)
+            .filter(Boolean);
+        }
+
         const attachments = await this.tenantAttachmentRepository.getByTenantID(
           tenant.id
         );
@@ -833,7 +944,7 @@ class TenantUseCase {
         return null;
       }
 
-      tenant.status = TenantStatusIntToStr[tenant.status];
+      tenant.status = TenantStatusIntToStr[tenant.status] ?? tenant.status;
       
       // Convert rent_duration_unit to string: 0 = year, 1 = month
       if (tenant.rent_duration_unit !== undefined && tenant.rent_duration_unit !== null) {
@@ -897,7 +1008,7 @@ class TenantUseCase {
           // No need to fetch separately
 
           // Convert status to string
-          tenant.status = TenantStatusIntToStr[tenant.status];
+          tenant.status = TenantStatusIntToStr[tenant.status] ?? tenant.status;
           
           // Convert rent_duration_unit to string: 0 = year, 1 = month
           if (tenant.rent_duration_unit !== undefined && tenant.rent_duration_unit !== null) {
@@ -948,7 +1059,32 @@ class TenantUseCase {
 
         const updatePayload = {};
         if (data.name !== undefined) updatePayload.name = data.name;
+        if (data.user_id !== undefined) updatePayload.user_id = data.user_id;
         if (data.status !== undefined) updatePayload.status = data.status;
+        if (data.contract_begin_at !== undefined) {
+          updatePayload.contract_begin_at = data.contract_begin_at;
+        }
+        if (data.contract_end_at !== undefined) {
+          updatePayload.contract_end_at = data.contract_end_at;
+        }
+        if (data.contract_begin_at !== undefined && data.contract_end_at !== undefined) {
+          const duration = this.calculateRentDurationFromContract(
+            data.contract_begin_at,
+            data.contract_end_at
+          );
+          updatePayload.rent_duration = duration.rent_duration;
+          updatePayload.rent_duration_unit = duration.rent_duration_unit;
+        }
+        if (data.category !== undefined) {
+          updatePayload.category_id = await this.resolveCategoryId(data.category, txCtx, t);
+        }
+        if (data.sub_category !== undefined) {
+          updatePayload.sub_category =
+            data.sub_category && typeof data.sub_category === 'string'
+              ? data.sub_category.trim() || null
+              : null;
+        }
+        if (data.payment_term !== undefined) updatePayload.payment_term = data.payment_term;
         if (data.building_area !== undefined) updatePayload.building_area = data.building_area;
         if (data.land_area !== undefined) updatePayload.land_area = data.land_area;
         if (data.electricity_power !== undefined) {
@@ -1000,12 +1136,32 @@ class TenantUseCase {
           );
         }
 
-        if (
+        const occupancyStatus = newStatusInt ?? oldStatusInt;
+        if (data.building_type === 'unit' && data.unit_ids !== undefined) {
+          await this.replaceTenantUnits(id, data.unit_ids, occupancyStatus, txCtx, t);
+          await this.tenantAssetRepository.deleteByTenantId(id, txCtx);
+        } else if (data.building_type === 'asset' && data.asset_ids !== undefined) {
+          await this.releaseUnitsForTenant(id, txCtx, t);
+          await this.tenantUnitRepository.deleteByTenantId(id, txCtx);
+          await this.replaceTenantAssets(id, data.asset_ids, txCtx, t);
+        }
+
+        const tenantStatusChanged =
           data.status !== undefined &&
           oldStatusInt !== undefined &&
           newStatusInt !== undefined &&
-          oldStatusInt !== newStatusInt
-        ) {
+          oldStatusInt !== newStatusInt;
+
+        // Sinkronkan unit saat status berubah, atau saat simpan tenant aktif/pending/expired
+        // (mis. tenant sudah active di DB tapi unit belum occupied karena sync sebelumnya gagal)
+        const shouldSyncUnitOccupancy =
+          newStatusInt !== undefined &&
+          (
+            tenantStatusChanged ||
+            (data.status !== undefined && this.isTenantStatusHoldingUnits(newStatusInt))
+          );
+
+        if (shouldSyncUnitOccupancy) {
           await this.syncTenantUnitOccupancy(id, newStatusInt, txCtx, t);
         }
 

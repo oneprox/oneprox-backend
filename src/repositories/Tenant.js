@@ -199,7 +199,10 @@ class TenantRepository {
 
     const allowedFields = new Set([
       'name',
+      'user_id',
       'status',
+      'contract_begin_at',
+      'contract_end_at',
       'rent_price',
       'ppn',
       'total_price',

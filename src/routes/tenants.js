@@ -2,6 +2,7 @@ const { Router } = require('express');
 const { body, validationResult, param, query } = require('express-validator');
 const { authMiddleware, ensureRole } = require('../middleware/auth');
 const { createResponse } = require('../services/response');
+const { errorMessage } = require('../utils/errorMessage');
 
 function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUsecase) {
   const router = Router();
@@ -89,9 +90,10 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
       }, {userId: req.auth.userId, log: req.log});
       res.status(201).json(createResponse(tenant, "success", 201));
     } catch (err) {
-      console.error("TenantRouter.createTenant_error: " + err.message);
-      req.log?.error({}, "TenantRouter.createTenant_error");
-      res.status(400).json(createResponse(null, "failed", 400, false, {}, err));
+      const msg = errorMessage(err, 'Gagal membuat tenant');
+      console.error("TenantRouter.createTenant_error: " + msg);
+      req.log?.error({ err: msg }, "TenantRouter.createTenant_error");
+      res.status(400).json(createResponse(null, msg, 400, false, {}, { message: msg }));
     }
   });
 
@@ -143,10 +145,16 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
       const updated = await TenantUseCase.updateTenant(req.params.id, req.body, {log: req.log, userId: req.auth.userId});
       res.status(202).json(createResponse(updated, "success", 202));
     } catch (err) {
-      req.log?.error({ tenant_id: req.params.id, update_data: req.body }, `TenantRouter.updateTenant_error: ${err.message}`);
+      const msg = errorMessage(
+        err,
+        err.statusCode === 400 ? 'Gagal memperbarui tenant' : 'internal server error'
+      );
+      req.log?.error(
+        { tenant_id: req.params.id, update_data: req.body, err: msg },
+        'TenantRouter.updateTenant_error'
+      );
       const status = err.statusCode === 400 ? 400 : 500;
-      const message = err.message || (status === 400 ? 'failed' : 'internal server error');
-      res.status(status).json(createResponse(null, message, status, false, {}, err));
+      res.status(status).json(createResponse(null, msg, status, false, {}, { message: msg }));
     }
   });
 

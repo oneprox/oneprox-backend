@@ -193,12 +193,35 @@ class TenantRepository {
     }
   }
 
-  async update(id, data) {
-    const tenant = await this.tenantModel.findByPk(id);
+  async update(id, data, transaction = null) {
+    const tenant = await this.tenantModel.findByPk(id, { transaction });
     if (!tenant) return null;
-    
-    // Convert rent_duration_unit from string to integer if needed
-    const updateData = { ...data };
+
+    const allowedFields = new Set([
+      'name',
+      'status',
+      'rent_price',
+      'ppn',
+      'total_price',
+      'building_area',
+      'land_area',
+      'electricity_power',
+      'deposit',
+      'payment_term',
+      'payment_status',
+      'updated_by',
+      'rent_duration',
+      'rent_duration_unit',
+      'sub_category',
+      'category_id',
+    ]);
+
+    const updateData = {};
+    for (const [key, value] of Object.entries(data)) {
+      if (allowedFields.has(key) && value !== undefined) {
+        updateData[key] = value;
+      }
+    }
     if (updateData.rent_duration_unit && typeof updateData.rent_duration_unit === 'string') {
       const { DurationUnit } = require('../models/Tenant');
       updateData.rent_duration_unit = DurationUnit[updateData.rent_duration_unit];
@@ -233,10 +256,10 @@ class TenantRepository {
       console.log(`[TenantRepository] Updating tenant ${id} payment_status to: ${updateData.payment_status}`);
     }
     
-    await tenant.update(updateData);
+    await tenant.update(updateData, { transaction });
     
     // Reload tenant to get the latest data
-    await tenant.reload();
+    await tenant.reload({ transaction });
     
     // Convert status back to string for response
     const tenantJson = tenant.toJSON();

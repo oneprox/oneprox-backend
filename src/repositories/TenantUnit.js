@@ -77,6 +77,24 @@ class TenantUnitRepository {
    * Tenant aktif lain (status = 1) yang masih memegang unit ini.
    * @returns {string|null} tenant_id
    */
+  /**
+   * Semua tenant yang masih punya relasi tenant_units ke unit ini.
+   * @returns {Array<{ id: string, name: string, code: string }>}
+   */
+  async findLinkedTenantsByUnitId(unitId) {
+    const { QueryTypes } = require('sequelize');
+    return this.tenantUnitModel.sequelize.query(
+      `
+      SELECT t.id, t.name, t.code
+      FROM tenant_units tu
+      INNER JOIN tenants t ON t.id = tu.tenant_id
+      WHERE tu.unit_id = :unitId
+      ORDER BY t.name ASC
+      `,
+      { replacements: { unitId }, type: QueryTypes.SELECT }
+    );
+  }
+
   async findActiveTenantIdByUnitId(unitId, excludeTenantId = null) {
     const { QueryTypes } = require('sequelize');
     const replacements = { unitId };

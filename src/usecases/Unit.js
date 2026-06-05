@@ -2,10 +2,27 @@ const sequelize = require("../models/sequelize");
 const { transformImageUrls } = require('../services/baseUrl');
 
 class UnitUsecase {
-  constructor(unitRepository, unitAttachmentRepository, unitLogRepository) {
+  constructor(unitRepository, unitAttachmentRepository, unitLogRepository, tenantUnitRepository) {
     this.unitRepository = unitRepository;
     this.unitAttachmentRepository = unitAttachmentRepository;
     this.unitLogRepository = unitLogRepository;
+    this.tenantUnitRepository = tenantUnitRepository;
+  }
+
+  formatLinkedTenantNames(tenants) {
+    return tenants.map((t) => t.name || t.code || t.id).join(', ');
+  }
+
+  async assertUnitNotLinkedToTenant(unitId) {
+    const linked = await this.tenantUnitRepository.findLinkedTenantsByUnitId(unitId);
+    if (linked.length === 0) return;
+
+    const err = new Error(
+      `Unit tidak dapat dihapus karena masih terhubung ke tenant: ${this.formatLinkedTenantNames(linked)}. Hapus tenant terlebih dahulu.`
+    );
+    err.statusCode = 400;
+    err.code = 'UNIT_LINKED_TO_TENANT';
+    throw err;
   }
 
   async createUnit(data, ctx) {
@@ -89,12 +106,14 @@ class UnitUsecase {
       is_toilet_exist: data.is_toilet_exist ?? unit.is_toilet_exist,
       description: data.description ?? unit.description,
       is_deleted: data.is_deleted ?? unit.is_deleted,
-      status: data.status ?? unit.status,
       updated_by: ctx.userId
     };
+    // Status unit dikelola oleh alur tenant (syncTenantUnitOccupancy), bukan saat edit data unit
+    if (data.status !== undefined) {
+      updatedData.status = data.status;
+    }
     const updatedUnit = await this.unitRepository.update(id, updatedData, ctx);
     if (updatedUnit) {
-      console.log('aman update unit')
       // Create log entry - only store changed data
       const oldData = {};
       const newData = {};
@@ -183,6 +202,8 @@ class UnitUsecase {
     if (!unit) {
       throw new Error("Unit not found");
     }
+
+    await this.assertUnitNotLinkedToTenant(id);
     
     // Create log entry before deletion
     const unitLog = {

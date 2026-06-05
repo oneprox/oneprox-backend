@@ -721,6 +721,20 @@ class TenantUseCase {
     }
   }
 
+  async replaceTenantAttachments(tenantId, urls, type, tx, ctx) {
+    if (!Array.isArray(urls)) return;
+    const attachmentType = AttachmentType[type];
+    await this.tenantAttachmentRepository.deleteByTenantIdAndType(
+      tenantId,
+      attachmentType,
+      { ...ctx, transaction: tx }
+    );
+    if (urls.length === 0) return;
+
+    const tenant = { id: tenantId };
+    await this.saveTenantAttachments(tenant, urls, type, tx, ctx);
+  }
+
   calculateDueDate(beginDate, rent_duration, rent_unit) {
     let endDate = moment(beginDate).tz("Asia/Jakarta");
     if (rent_unit == "year") {
@@ -778,12 +792,14 @@ class TenantUseCase {
         );
 
         if (tenantUnits.length > 0) {
-          let units = [];
+          const units = [];
           for (let i = 0; i < tenantUnits.length; i++) {
-            let unit = await this.unitRepository.findById(
+            const unit = await this.unitRepository.findById(
               tenantUnits[i].unit_id
             );
-            units.push(unit);
+            if (unit) {
+              units.push(unit);
+            }
           }
 
           tenant.units = units;
@@ -813,6 +829,10 @@ class TenantUseCase {
         }
       }
 
+      if (!tenant) {
+        return null;
+      }
+
       tenant.status = TenantStatusIntToStr[tenant.status];
       
       // Convert rent_duration_unit to string: 0 = year, 1 = month
@@ -840,13 +860,14 @@ class TenantUseCase {
             tenant.id
           );
           if (tenantUnits.length > 0) {
-            let units = [];
+            const units = [];
             for (let i = 0; i < tenantUnits.length; i++) {
-              let unit = await this.unitRepository.findById(
+              const unit = await this.unitRepository.findById(
                 tenantUnits[i].unit_id
               );
+              if (!unit) continue;
               // Transform unit photos if they exist
-              if (unit && unit.photos) {
+              if (unit.photos) {
                 unit.photos = transformImageUrls(unit.photos);
               }
               units.push(unit);
@@ -900,82 +921,119 @@ class TenantUseCase {
   async updateTenant(id, data, ctx) {
     try {
       ctx.log?.info({ tenant_id: id, update_data: data }, "TenantUsecase.updateTenant");
-      
-      // Get old data before update
-      const oldTenant = await this.tenantRepository.findById(id, ctx);
-      if (!oldTenant) {
-        throw new Error('Tenant not found');
-      }
 
-      const oldStatusInt = this.resolveTenantStatusInt(oldTenant.status);
+      const result = await sequelize.transaction(async (t) => {
+        const txCtx = { ...ctx, transaction: t };
 
-      const newStatusInt =
-        data.status !== undefined
-          ? this.resolveTenantStatusInt(data.status)
-          : oldStatusInt;
-
-      const activating =
-        newStatusInt !== undefined &&
-        oldStatusInt !== undefined &&
-        !this.isTenantStatusActive(oldStatusInt) &&
-        this.isTenantStatusActive(newStatusInt);
-
-      if (activating) {
-        await this.validateResourcesAvailableForActivation(id, ctx);
-      }
-
-      const updatePayload = { ...data };
-      if (data.ppn !== undefined || data.rent_price !== undefined) {
-        const { normalizeTenantPricing } = require('../utils/tenantPricing');
-        const pricing = normalizeTenantPricing(
-          {
-            rent_price: data.rent_price,
-            ppn: data.ppn,
-          },
-          oldTenant.rent_price
-        );
-        updatePayload.ppn = pricing.ppn;
-        updatePayload.total_price = pricing.total_price;
-        if (data.rent_price !== undefined) {
-          updatePayload.rent_price = pricing.rent_price;
+        const oldTenant = await this.tenantRepository.findById(id, txCtx);
+        if (!oldTenant) {
+          throw new Error('Tenant not found');
         }
-      }
 
-      const updatedTenant = await this.tenantRepository.update(id, updatePayload);
+        const oldStatusInt = this.resolveTenantStatusInt(oldTenant.status);
+        const newStatusInt =
+          data.status !== undefined
+            ? this.resolveTenantStatusInt(data.status)
+            : oldStatusInt;
 
-      if (
-        data.status !== undefined &&
-        oldStatusInt !== undefined &&
-        newStatusInt !== undefined &&
-        oldStatusInt !== newStatusInt
-      ) {
-        await this.syncTenantUnitOccupancy(id, newStatusInt, ctx);
-      }
-      
-      // Create log entry - only log changed fields
-      const changedFields = {};
-      const oldData = {};
-      
-      // Check each field for changes
-      Object.keys(data).forEach(key => {
-        if (data[key] !== undefined) {
+        const activating =
+          newStatusInt !== undefined &&
+          oldStatusInt !== undefined &&
+          !this.isTenantStatusActive(oldStatusInt) &&
+          this.isTenantStatusActive(newStatusInt);
+
+        if (activating) {
+          await this.validateResourcesAvailableForActivation(id, txCtx, t);
+        }
+
+        const updatePayload = {};
+        if (data.name !== undefined) updatePayload.name = data.name;
+        if (data.status !== undefined) updatePayload.status = data.status;
+        if (data.building_area !== undefined) updatePayload.building_area = data.building_area;
+        if (data.land_area !== undefined) updatePayload.land_area = data.land_area;
+        if (data.electricity_power !== undefined) {
+          updatePayload.electricity_power = data.electricity_power;
+        }
+        if (data.deposit !== undefined) updatePayload.deposit = data.deposit;
+        if (data.payment_status !== undefined) updatePayload.payment_status = data.payment_status;
+        updatePayload.updated_by = ctx.userId;
+
+        if (data.ppn !== undefined || data.rent_price !== undefined) {
+          const { normalizeTenantPricing } = require('../utils/tenantPricing');
+          const pricing = normalizeTenantPricing(
+            {
+              rent_price: data.rent_price,
+              ppn: data.ppn,
+            },
+            oldTenant.rent_price
+          );
+          updatePayload.ppn = pricing.ppn;
+          updatePayload.total_price = pricing.total_price;
+          if (data.rent_price !== undefined) {
+            updatePayload.rent_price = pricing.rent_price;
+          }
+        } else if (data.total_price !== undefined) {
+          updatePayload.total_price = data.total_price;
+        }
+
+        const updatedTenant = await this.tenantRepository.update(id, updatePayload, t);
+        if (!updatedTenant) {
+          throw new Error('Tenant not found');
+        }
+
+        if (data.tenant_identifications !== undefined) {
+          await this.replaceTenantAttachments(
+            id,
+            data.tenant_identifications,
+            'id',
+            t,
+            txCtx
+          );
+        }
+        if (data.contract_documents !== undefined) {
+          await this.replaceTenantAttachments(
+            id,
+            data.contract_documents,
+            'contract',
+            t,
+            txCtx
+          );
+        }
+
+        if (
+          data.status !== undefined &&
+          oldStatusInt !== undefined &&
+          newStatusInt !== undefined &&
+          oldStatusInt !== newStatusInt
+        ) {
+          await this.syncTenantUnitOccupancy(id, newStatusInt, txCtx, t);
+        }
+
+        const loggableKeys = [
+          'name',
+          'status',
+          'rent_price',
+          'ppn',
+          'total_price',
+          'building_area',
+          'land_area',
+          'electricity_power',
+          'deposit',
+          'payment_status',
+        ];
+        const changedFields = {};
+        const oldData = {};
+
+        for (const key of loggableKeys) {
+          if (data[key] === undefined) continue;
           let hasChanged = false;
           if (key === 'status') {
-            // Compare status: convert oldTenant status (integer) to string for comparison
-            const oldStatusStr = TenantStatusIntToStr[oldTenant[key]] || String(oldTenant[key]);
+            const oldStatusStr =
+              TenantStatusIntToStr[oldTenant.status] || String(oldTenant.status);
             hasChanged = data[key] !== oldStatusStr;
             if (hasChanged) {
               oldData[key] = oldStatusStr;
               changedFields[key] = data[key];
-            }
-          } else if (key === 'rent_duration_unit') {
-            // Compare rent_duration_unit: convert oldTenant (integer) to string for comparison
-            const oldUnitStr = DurationUnitStr[oldTenant[key]];
-            const newUnitStr = typeof data[key] === 'string' ? data[key] : DurationUnitStr[data[key]];
-            hasChanged = newUnitStr !== oldUnitStr;
-            if (hasChanged) {
-              oldData[key] = oldUnitStr;
-              changedFields[key] = newUnitStr;
             }
           } else {
             hasChanged = data[key] !== oldTenant[key];
@@ -985,36 +1043,49 @@ class TenantUseCase {
             }
           }
         }
+
+        if (data.tenant_identifications !== undefined) {
+          changedFields.tenant_identifications = data.tenant_identifications;
+        }
+        if (data.contract_documents !== undefined) {
+          changedFields.contract_documents = data.contract_documents;
+        }
+
+        if (Object.keys(changedFields).length > 0) {
+          await this.tenantLogRepository.create(
+            {
+              tenant_id: id,
+              action: 'UPDATE',
+              old_data: oldData,
+              new_data: changedFields,
+              created_by: ctx.userId,
+            },
+            txCtx
+          );
+        }
+
+        if (data.deposit !== undefined && data.deposit !== oldTenant.deposit) {
+          await this.depositoLogRepository.create(
+            {
+              tenant_id: id,
+              old_deposit: oldTenant.deposit,
+              new_deposit: data.deposit,
+              reason: data.deposit_reason || null,
+              created_by: ctx.userId,
+            },
+            txCtx
+          );
+        }
+
+        return updatedTenant;
       });
 
-      // Only create log if there are actual changes
-      if (Object.keys(changedFields).length > 0) {
-        const tenantLog = {
-          tenant_id: id,
-          action: 'UPDATE',
-          old_data: oldData,
-          new_data: changedFields,
-          created_by: ctx.userId,
-        };
-
-        await this.tenantLogRepository.create(tenantLog, ctx);
-      }
-      
-      // Create deposito log if deposit changed
-      if (data.deposit !== undefined && data.deposit !== oldTenant.deposit) {
-        const depositoLog = {
-          tenant_id: id,
-          old_deposit: oldTenant.deposit,
-          new_deposit: data.deposit,
-          reason: data.deposit_reason || null,
-          created_by: ctx.userId,
-        };
-        await this.depositoLogRepository.create(depositoLog, ctx);
-      }
-      
-      return updatedTenant;
+      return result;
     } catch (error) {
-      ctx.log?.error({ tenant_id: id, update_data: data }, `TenantUsecase.updateTenant_error: ${error.message}`);
+      ctx.log?.error(
+        { tenant_id: id, update_data: data },
+        `TenantUsecase.updateTenant_error: ${error.message}`
+      );
       throw error;
     }
   }
@@ -1050,6 +1121,7 @@ class TenantUseCase {
 
       // Delete related data first
       await this.tenantUnitRepository.deleteByTenantId(id, { ...ctx, transaction });
+      await this.tenantAssetRepository.deleteByTenantId(id, { ...ctx, transaction });
       
       // Delete tenant attachments
       await this.tenantAttachmentRepository.deleteByTenantId(id, { ...ctx, transaction });

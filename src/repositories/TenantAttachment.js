@@ -32,6 +32,13 @@ class TenantAttachmentRepositoy {
       throw error;
     }
   }
+
+  async deleteByTenantIdAndType(tenantId, attachmentType, ctx = {}) {
+    return this.tenantAttachmentModel.destroy({
+      where: { tenant_id: tenantId, attachment_type: attachmentType },
+      transaction: ctx.transaction,
+    });
+  }
 }
 
 module.exports = TenantAttachmentRepositoy;

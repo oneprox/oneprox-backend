@@ -139,7 +139,9 @@ function InitUnitRouter(UnitUsecase) {
         return res.status(200).json(createResponse(unit, 'Unit deleted successfully', 200));
       } catch (error) {
         req.log?.error({ error: error.message }, 'route_units_delete_error');
-        return res.status(500).json(createResponse(null, 'Internal Server Error', 500));
+        const status = error.statusCode === 400 ? 400 : 500;
+        const message = error.message || (status === 400 ? 'failed' : 'Internal Server Error');
+        return res.status(status).json(createResponse(null, message, status, false, {}, error));
       }
     }
   );

@@ -7,11 +7,42 @@ const { AssetStatusIntToStr, AssetTypeIntToStr } = require('../models/Asset');
 const { transformImageUrls } = require('../services/baseUrl');
 
 class AssetUsecase {
-  constructor(assetRepository, assetLogRepository, assetAttachmentRepository, unitRepository) {
+  constructor(
+    assetRepository,
+    assetLogRepository,
+    assetAttachmentRepository,
+    unitRepository,
+    tenantAssetRepository
+  ) {
     this.assetRepository = assetRepository;
     this.assetLogRepository = assetLogRepository;
     this.assetAttachmentRepository = assetAttachmentRepository;
     this.unitRepository = unitRepository;
+    this.tenantAssetRepository = tenantAssetRepository;
+  }
+
+  formatLinkedTenantNames(tenants) {
+    const unique = new Map();
+    for (const t of tenants) {
+      unique.set(t.id, t.name || t.code || t.id);
+    }
+    return [...unique.values()].join(', ');
+  }
+
+  async assertAssetNotLinkedToTenant(assetId) {
+    const [directLinks, unitLinks] = await Promise.all([
+      this.tenantAssetRepository.findLinkedTenantsByAssetId(assetId),
+      this.tenantAssetRepository.findLinkedTenantsByAssetUnits(assetId),
+    ]);
+    const linked = [...directLinks, ...unitLinks];
+    if (linked.length === 0) return;
+
+    const err = new Error(
+      `Asset tidak dapat dihapus karena masih terhubung ke tenant: ${this.formatLinkedTenantNames(linked)}. Hapus tenant terlebih dahulu.`
+    );
+    err.statusCode = 400;
+    err.code = 'ASSET_LINKED_TO_TENANT';
+    throw err;
   }
 
   async createAsset(data, ctx) {
@@ -357,6 +388,8 @@ class AssetUsecase {
   async deleteAsset(id, ctx) {
     const asset = await this.assetRepository.findById(id, ctx);
     if (!asset) return null;
+
+    await this.assertAssetNotLinkedToTenant(id);
     
     // Create log entry before deletion
     const assetLog = {

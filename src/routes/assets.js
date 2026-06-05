@@ -174,17 +174,24 @@ function InitAssetRouter(AssetUsecase) {
     [param("id").isString().notEmpty()],
     async (req, res) => {
       req.log?.info({ id: req.params.id }, "route_assets_delete");
-      const deleted = await AssetUsecase.deleteAsset(req.params.id, {
-        requestId: req.requestId,
-        log: req.log,
-        roleName: req.auth.roleName,
-        userID: req.auth.userId,
-      });
-      if (!deleted)
-        return res.status(404).json(createResponse(null, "not found", 404));
-      if (deleted === "forbidden")
-        return res.status(403).json(createResponse(null, "forbidden", 403));
-      return res.status(200).json(createResponse(deleted, "Asset deleted successfully", 200));
+      try {
+        const deleted = await AssetUsecase.deleteAsset(req.params.id, {
+          requestId: req.requestId,
+          log: req.log,
+          roleName: req.auth.roleName,
+          userID: req.auth.userId,
+        });
+        if (!deleted)
+          return res.status(404).json(createResponse(null, "not found", 404));
+        if (deleted === "forbidden")
+          return res.status(403).json(createResponse(null, "forbidden", 403));
+        return res.status(200).json(createResponse(deleted, "Asset deleted successfully", 200));
+      } catch (error) {
+        req.log?.error({ error: error.message }, "route_assets_delete_error");
+        const status = error.statusCode === 400 ? 400 : 500;
+        const message = error.message || (status === 400 ? "failed" : "Internal Server Error");
+        return res.status(status).json(createResponse(null, message, status, false, {}, error));
+      }
     }
   );
 

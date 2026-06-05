@@ -220,7 +220,13 @@ Object.keys(models).forEach(modelName => {
 });
 
 // initialize usecase
-const assetUsecase = new assetUc(assetRepository, assetLogRepository, assetAttachmentRepository, unitRepository);
+const assetUsecase = new assetUc(
+  assetRepository,
+  assetLogRepository,
+  assetAttachmentRepository,
+  unitRepository,
+  tenantAssetRepository
+);
 const authUsecase = new authUc(
   userRepository,
   process.env.JWT_SECRET,
@@ -231,7 +237,7 @@ const authUsecase = new authUc(
   userAssetRepository,
 );
 const userUsecase = new userUc(userRepository, userLogRepository, userAssetRepository);
-const unitUsecase = new unitUc(unitRepository, unitAttachmentRepository, unitLogRepository);
+const unitUsecase = new unitUc(unitRepository, unitAttachmentRepository, unitLogRepository, tenantUnitRepository);
 const tenantUsecase = new tenantUc(tenantRepository, tenantAttachmentRepository, tenantUnitRepository, tenantAssetRepository, mapTenantCategoryRepository, tenantCategoryRepository, unitRepository, tenantLogRepository, depositoLogRepository, userUsecase, tenantPaymentLogRepository, tenantLegalRepository, settingsRepository);
 const roleUsecase = new roleUc(roleRepository);
 const menuUsecase = new menuUc(menuRepository);

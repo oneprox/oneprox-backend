@@ -23,6 +23,43 @@ class TenantAssetRepository {
    * Tenant aktif lain (status = 1) yang masih memegang asset ini.
    * @returns {string|null} tenant_id
    */
+  /**
+   * Tenant yang terhubung langsung lewat tenant_assets.
+   * @returns {Array<{ id: string, name: string, code: string }>}
+   */
+  async findLinkedTenantsByAssetId(assetId) {
+    const { QueryTypes } = require('sequelize');
+    return this.tenantAssetModel.sequelize.query(
+      `
+      SELECT t.id, t.name, t.code
+      FROM tenant_assets ta
+      INNER JOIN tenants t ON t.id = ta.tenant_id
+      WHERE ta.asset_id = :assetId
+      ORDER BY t.name ASC
+      `,
+      { replacements: { assetId }, type: QueryTypes.SELECT }
+    );
+  }
+
+  /**
+   * Tenant yang terhubung lewat unit di bawah asset ini.
+   * @returns {Array<{ id: string, name: string, code: string }>}
+   */
+  async findLinkedTenantsByAssetUnits(assetId) {
+    const { QueryTypes } = require('sequelize');
+    return this.tenantAssetModel.sequelize.query(
+      `
+      SELECT DISTINCT t.id, t.name, t.code
+      FROM tenant_units tu
+      INNER JOIN tenants t ON t.id = tu.tenant_id
+      INNER JOIN units u ON u.id = tu.unit_id
+      WHERE u.asset_id = :assetId
+      ORDER BY t.name ASC
+      `,
+      { replacements: { assetId }, type: QueryTypes.SELECT }
+    );
+  }
+
   async findActiveTenantIdByAssetId(assetId, excludeTenantId = null) {
     const { QueryTypes } = require('sequelize');
     const replacements = { assetId };

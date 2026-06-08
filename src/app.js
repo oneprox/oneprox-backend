@@ -315,7 +315,7 @@ app.use(cors({
 }));
 app.use(requestContext);
 app.use(metricsMiddleware);
-const jsonBodyLimit = process.env.JSON_BODY_LIMIT || '10mb';
+const jsonBodyLimit = process.env.JSON_BODY_LIMIT || '30mb';
 app.use(express.json({ limit: jsonBodyLimit }));
 app.use(
   morgan((tokens, req, res) => {

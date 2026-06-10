@@ -3,6 +3,33 @@ const { body, validationResult, param, query } = require('express-validator');
 const { authMiddleware, ensureRole } = require('../middleware/auth');
 const { createResponse } = require('../services/response');
 
+const UNIT_STATUS_INPUT_MAP = {
+  available: 'available',
+  occupied: 'occupied',
+  maintenance: 'maintenance',
+  reserved: 'reserved',
+  inactive: 'inactive',
+  out_of_order: 'out_of_order',
+  0: 'available',
+  1: 'occupied',
+  2: 'maintenance',
+  3: 'reserved',
+  4: 'inactive',
+  5: 'out_of_order',
+  '0': 'available',
+  '1': 'occupied',
+  '2': 'maintenance',
+  '3': 'reserved',
+  '4': 'inactive',
+  '5': 'out_of_order',
+};
+
+function normalizeUnitStatusInput(value) {
+  if (value === undefined || value === null || value === '') return undefined;
+  const key = String(value).trim().toLowerCase();
+  return UNIT_STATUS_INPUT_MAP[key] ?? UNIT_STATUS_INPUT_MAP[value];
+}
+
 function InitUnitRouter(UnitUsecase) {
   const router = Router();
 
@@ -91,30 +118,46 @@ function InitUnitRouter(UnitUsecase) {
     '/:id',
     [
       param('id').isString().notEmpty(),
+      body('asset_id').optional({ values: 'falsy' }).isUUID().withMessage('asset_id must be a valid UUID'),
       body('name').optional().isString().notEmpty(),
-      body('size').optional().isFloat().notEmpty(),
-      body('building_area').optional().isFloat().notEmpty(),
+      body('size').optional().isFloat({ min: 0.01 }).withMessage('size must be a positive number'),
+      body('building_area').optional().isFloat({ min: 0.01 }).withMessage('building_area must be a positive number'),
       body('electrical_power').optional().isNumeric(),
       body('electrical_unit').optional().isString(),
       body('is_toilet_exist').optional().isBoolean(),
       body('description').optional().isString(),
-      body('status').optional().isIn(['available', 'occupied', 'maintenance', 'reserved', 'inactive', 'out_of_order']).withMessage('status must be one of: available, occupied, maintenance, reserved, inactive, out_of_order')
+      body('status')
+        .optional({ values: 'falsy' })
+        .custom((value) => normalizeUnitStatusInput(value) !== undefined)
+        .withMessage('status must be one of: available, occupied, maintenance, reserved, inactive, out_of_order (or 0-5)'),
     ],
     async (req, res) => {
       const errors = validationResult(req);
       if (!errors.isEmpty()) return res.status(400).json(createResponse(null, "bad request", 400, false, {}, errors));
-      const { name, size, building_area, electrical_power, electrical_unit, is_toilet_exist, description, status } = req.body;
+      const {
+        name,
+        asset_id,
+        size,
+        building_area,
+        electrical_power,
+        electrical_unit,
+        is_toilet_exist,
+        description,
+        status,
+      } = req.body;
+      const normalizedStatus = normalizeUnitStatusInput(status);
       req.log?.info({ id: req.params.id }, 'route_units_update');
       try {
         const unit = await UnitUsecase.updateUnit(req.params.id, {
           name,
+          asset_id,
           size,
           building_area,
           electrical_power,
           electrical_unit,
           is_toilet_exist,
           description,
-          status,
+          ...(normalizedStatus !== undefined ? { status: normalizedStatus } : {}),
           updatedBy: req.auth.userId
         }, { requestId: req.requestId, log: req.log, roleName: req.auth.roleName, userId: req.auth.userId });
         if (!unit) return res.status(404).json(createResponse(null, 'not found', 404 ));

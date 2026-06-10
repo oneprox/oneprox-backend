@@ -111,7 +111,10 @@ class TenantPaymentLogUsecase {
           updateData.paid_amount = paidAmountNumber > 0 ? paidAmountNumber : null;
           if (paidAmountNumber <= 0) {
             updateData.payment_date = null;
-            updateData.payment_method = null;
+            // Hanya kosongkan metode pembayaran jika tidak dikirim eksplisit di request.
+            if (data.payment_method === undefined) {
+              updateData.payment_method = null;
+            }
             // outstanding, overdue, rate, last_charge_date: biarkan nilai dari body;
             // jangan di-null otomatis agar update rate/penagihan saat unpaid tetap tersimpan.
           }

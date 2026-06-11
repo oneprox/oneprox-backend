@@ -238,7 +238,7 @@ const authUsecase = new authUc(
 );
 const userUsecase = new userUc(userRepository, userLogRepository, userAssetRepository);
 const unitUsecase = new unitUc(unitRepository, unitAttachmentRepository, unitLogRepository, tenantUnitRepository);
-const tenantUsecase = new tenantUc(tenantRepository, tenantAttachmentRepository, tenantUnitRepository, tenantAssetRepository, mapTenantCategoryRepository, tenantCategoryRepository, unitRepository, tenantLogRepository, depositoLogRepository, userUsecase, tenantPaymentLogRepository, tenantLegalRepository, settingsRepository);
+const tenantUsecase = new tenantUc(tenantRepository, tenantAttachmentRepository, tenantUnitRepository, tenantAssetRepository, mapTenantCategoryRepository, tenantCategoryRepository, unitRepository, assetRepository, tenantLogRepository, depositoLogRepository, userUsecase, tenantPaymentLogRepository, tenantLegalRepository, settingsRepository);
 const roleUsecase = new roleUc(roleRepository);
 const menuUsecase = new menuUc(menuRepository);
 const userAccessMenuUsecase = new userAccessMenuUc(userAccessMenuRepository);

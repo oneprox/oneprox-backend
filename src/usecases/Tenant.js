@@ -20,6 +20,7 @@ class TenantUseCase {
     tenantCategoryMapRepo,
     tenantCategoryRepo,
     unitRepository,
+    assetRepository,
     tenantLogRepository,
     depositoLogRepository,
     userUsecase,
@@ -34,6 +35,7 @@ class TenantUseCase {
     this.tenantCategoryMapRepo = tenantCategoryMapRepo;
     this.tenantCategoryRepo = tenantCategoryRepo;
     this.unitRepository = unitRepository;
+    this.assetRepository = assetRepository;
     this.tenantLogRepository = tenantLogRepository;
     this.depositoLogRepository = depositoLogRepository;
     this.userUsecase = userUsecase;
@@ -487,9 +489,11 @@ class TenantUseCase {
       if (typeof statusInt === 'string') {
         statusInt = UnitStatusStrToInt[statusInt];
       }
+      // Unit yang sudah ditahan tenant ini boleh occupied/reserved (bukan hanya available).
       const allowedStatuses = [
         UnitStatusStrToInt.available,
         UnitStatusStrToInt.reserved,
+        UnitStatusStrToInt.occupied,
       ];
       if (!allowedStatuses.includes(statusInt)) {
         const statusLabel = UnitStatusIntToStr[statusInt] || 'occupied';
@@ -885,36 +889,52 @@ class TenantUseCase {
     return undefined;
   }
 
+  async attachTenantResources(tenant, ctx) {
+    const tenantUnits = await this.tenantUnitRepository.getByTenantID(tenant.id);
+
+    if (tenantUnits.length > 0) {
+      const units = [];
+      for (let i = 0; i < tenantUnits.length; i++) {
+        const unit = await this.unitRepository.findById(tenantUnits[i].unit_id);
+        if (unit) {
+          units.push(unit);
+        }
+      }
+
+      tenant.units = units;
+      tenant.building_type = 'unit';
+      return tenant;
+    }
+
+    const tenantAssets = await this.tenantAssetRepository.getByTenantID(tenant.id);
+    if (tenantAssets.length > 0) {
+      const assetIds = tenantAssets
+        .map((ta) => ta.asset_id || ta.get?.('asset_id') || ta.toJSON?.()?.asset_id)
+        .filter(Boolean);
+
+      const assets = [];
+      for (let i = 0; i < assetIds.length; i++) {
+        const asset = await this.assetRepository.findById(assetIds[i], ctx);
+        if (asset) {
+          assets.push(asset);
+        }
+      }
+
+      tenant.asset_ids = assetIds;
+      tenant.assets = assets;
+      tenant.building_type = 'asset';
+    }
+
+    return tenant;
+  }
+
   async getTenantById(id, ctx) {
     try {
       ctx.log?.info({ tenant_id: id }, "TenantUsecase.getTenantById");
       const tenant = await this.tenantRepository.findById(id, ctx);
 
       if (tenant) {
-        const tenantUnits = await this.tenantUnitRepository.getByTenantID(
-          tenant.id
-        );
-
-        if (tenantUnits.length > 0) {
-          const units = [];
-          for (let i = 0; i < tenantUnits.length; i++) {
-            const unit = await this.unitRepository.findById(
-              tenantUnits[i].unit_id
-            );
-            if (unit) {
-              units.push(unit);
-            }
-          }
-
-          tenant.units = units;
-        }
-
-        const tenantAssets = await this.tenantAssetRepository.getByTenantID(tenant.id);
-        if (tenantAssets.length > 0) {
-          tenant.asset_ids = tenantAssets
-            .map((ta) => ta.asset_id || ta.get?.('asset_id') || ta.toJSON?.()?.asset_id)
-            .filter(Boolean);
-        }
+        await this.attachTenantResources(tenant, ctx);
 
         const attachments = await this.tenantAttachmentRepository.getByTenantID(
           tenant.id
@@ -966,24 +986,13 @@ class TenantUseCase {
       // Process each tenant to include attachments, units, and categories
       const processedTenants = await Promise.all(
         data.tenants.map(async (tenant) => {
-          // Get tenant units
-          const tenantUnits = await this.tenantUnitRepository.getByTenantID(
-            tenant.id
-          );
-          if (tenantUnits.length > 0) {
-            const units = [];
-            for (let i = 0; i < tenantUnits.length; i++) {
-              const unit = await this.unitRepository.findById(
-                tenantUnits[i].unit_id
-              );
-              if (!unit) continue;
-              // Transform unit photos if they exist
-              if (unit.photos) {
-                unit.photos = transformImageUrls(unit.photos);
+          await this.attachTenantResources(tenant, ctx);
+          if (tenant.units?.length > 0) {
+            for (let i = 0; i < tenant.units.length; i++) {
+              if (tenant.units[i].photos) {
+                tenant.units[i].photos = transformImageUrls(tenant.units[i].photos);
               }
-              units.push(unit);
             }
-            tenant.units = units;
           }
 
           // Get tenant attachments
@@ -1137,10 +1146,15 @@ class TenantUseCase {
         }
 
         const occupancyStatus = newStatusInt ?? oldStatusInt;
-        if (data.building_type === 'unit' && data.unit_ids !== undefined) {
+        const unitsReplaced =
+          data.building_type === 'unit' && data.unit_ids !== undefined;
+        const assetsReplaced =
+          data.building_type === 'asset' && data.asset_ids !== undefined;
+
+        if (unitsReplaced) {
           await this.replaceTenantUnits(id, data.unit_ids, occupancyStatus, txCtx, t);
           await this.tenantAssetRepository.deleteByTenantId(id, txCtx);
-        } else if (data.building_type === 'asset' && data.asset_ids !== undefined) {
+        } else if (assetsReplaced) {
           await this.releaseUnitsForTenant(id, txCtx, t);
           await this.tenantUnitRepository.deleteByTenantId(id, txCtx);
           await this.replaceTenantAssets(id, data.asset_ids, txCtx, t);
@@ -1152,14 +1166,13 @@ class TenantUseCase {
           newStatusInt !== undefined &&
           oldStatusInt !== newStatusInt;
 
-        // Sinkronkan unit saat status berubah, atau saat simpan tenant aktif/pending/expired
-        // (mis. tenant sudah active di DB tapi unit belum occupied karena sync sebelumnya gagal)
+        // Sinkronkan unit hanya saat status berubah tanpa replace unit/asset
+        // (replaceTenantUnits/replaceTenantAssets sudah memanggil syncTenantUnitOccupancy)
         const shouldSyncUnitOccupancy =
           newStatusInt !== undefined &&
-          (
-            tenantStatusChanged ||
-            (data.status !== undefined && this.isTenantStatusHoldingUnits(newStatusInt))
-          );
+          !unitsReplaced &&
+          !assetsReplaced &&
+          tenantStatusChanged;
 
         if (shouldSyncUnitOccupancy) {
           await this.syncTenantUnitOccupancy(id, newStatusInt, txCtx, t);

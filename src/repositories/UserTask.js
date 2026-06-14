@@ -322,7 +322,7 @@ class UserTaskRepository {
               {
                 model: TaskGroup,
                 as: 'taskGroup',
-                attributes: ['id', 'name'],
+                attributes: ['id', 'name', 'start_time', 'end_time'],
                 required: false,
               },
             ],
@@ -640,7 +640,7 @@ class UserTaskRepository {
               include: [
                 { model: Role, as: 'role', attributes: ['id', 'name', 'level'], required: false },
                 { model: Asset, as: 'asset', attributes: ['id', 'name', 'code'], required: false },
-                { model: TaskGroup, as: 'taskGroup', attributes: ['id', 'name'], required: false },
+                { model: TaskGroup, as: 'taskGroup', attributes: ['id', 'name', 'start_time', 'end_time'], required: false },
               ],
             },
             { model: this.userTaskEvidenceModel, as: 'evidences', attributes: ['id', 'user_task_id', 'url', 'created_at'] },

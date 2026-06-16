@@ -834,21 +834,21 @@ class DashboardUsecase {
       });
       
       // Calculate overview data dari tenant aktif
-      let totalLandArea = 0;
-      let totalBuildingArea = 0;
+      let totalLandAreaTersewa = 0;
+      let totalBuildingAreaTersewa = 0;
       let totalUnits = 0;
       let totalRevenue = 0;
-      
+
       filteredAssets.forEach(asset => {
         const assetData = asset.toJSON ? asset.toJSON() : asset;
-        
+
         // Get units for this asset (semua unit di aset, termasuk yang belum berpenghuni)
         const assetUnits = allAssetUnits.filter((u) => {
           const aid = u.asset?.id ?? u.asset_id;
           return aid === assetData.id;
         });
         totalUnits += assetUnits.length;
-        
+
         // Get active tenants for this asset (through units)
         const assetUnitIds = assetUnits.map(u => {
           const unitData = u.toJSON ? u.toJSON() : u;
@@ -863,20 +863,29 @@ class DashboardUsecase {
             return assetUnitIds.includes(unitId) || unitAssetId === assetData.id;
           });
         });
-        
-        // Calculate land area dan building area dari tenant aktif
+
+        // Calculate land area dan building area dari tenant aktif (tersewa)
         assetTenants.forEach(tenant => {
           const tenantLandArea = parseFloat(tenant.land_area) || 0;
           const tenantBuildingArea = parseFloat(tenant.building_area) || 0;
-          totalLandArea += tenantLandArea;
-          totalBuildingArea += tenantBuildingArea;
+          totalLandAreaTersewa += tenantLandArea;
+          totalBuildingAreaTersewa += tenantBuildingArea;
         });
-        
+
         // Calculate revenue
         assetTenants.forEach(tenant => {
           const rentPrice = parseFloat(tenant.rent_price) || 0;
           totalRevenue += rentPrice;
         });
+      });
+
+      // Calculate land area dan building area dari semua unit (aset)
+      let totalLandAreaAsset = 0;
+      let totalBuildingAreaAsset = 0;
+      allAssetUnits.forEach(unit => {
+        const u = unit.toJSON ? unit.toJSON() : unit;
+        totalLandAreaAsset += parseFloat(u.size) || 0;
+        totalBuildingAreaAsset += parseFloat(u.building_area) || 0;
       });
 
       const unitsInScope = new Set();
@@ -904,7 +913,7 @@ class DashboardUsecase {
 
       const occupiedUnits = unitIdToCategory.size;
       const occupancy = totalUnits > 0 ? (occupiedUnits / totalUnits) * 100 : 0;
-      const averageRate = totalBuildingArea > 0 ? totalRevenue / totalBuildingArea : 0;
+      const averageRate = totalBuildingAreaTersewa > 0 ? totalRevenue / totalBuildingAreaTersewa : 0;
 
       const utilizationMap = new Map();
       for (const cat of unitIdToCategory.values()) {
@@ -1161,8 +1170,10 @@ class DashboardUsecase {
       
       return {
         overview: {
-          totalLandArea,
-          totalBuildingArea,
+          totalLandAreaAsset,
+          totalLandAreaTersewa,
+          totalBuildingAreaAsset,
+          totalBuildingAreaTersewa,
           occupancy,
           averageRate
         },

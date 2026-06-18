@@ -1081,7 +1081,7 @@ class DashboardUsecase {
         return { quarter, realisasi: data.realisasi, target: data.target };
       });
       
-      // Load legal data (due date ada & belum selesai; termasuk overdue)
+      // Load legal data: semua tenant aktif dalam scope aset, status dokumen apapun
       const legalTableData = [];
       const now = new Date();
       const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -1092,41 +1092,50 @@ class DashboardUsecase {
       const legalDocDescriptionByKey = new Map(
         (Array.isArray(legalDocSettings) ? legalDocSettings : []).map((setting) => [setting.key, setting.description || null])
       );
-      
-      // Get legal documents for each tenant
-      for (const tenant of allTenants) {
+
+      const tenantsInLegalScope = [];
+      const seenLegalTenantIds = new Set();
+      allFilteredTenants.forEach((tenant) => {
+        if (!seenLegalTenantIds.has(tenant.id)) {
+          seenLegalTenantIds.add(tenant.id);
+          tenantsInLegalScope.push(tenant);
+        }
+      });
+
+      const resolveTenantAssetContext = (tenantData) => {
+        const tenantUnitsForLegal = tenantData.units && Array.isArray(tenantData.units) ? tenantData.units : [];
+        const tenantUnit = tenantUnitsForLegal[0];
+        if (!tenantUnit) return null;
+
+        const asset = tenantUnit?.asset || (tenantUnit?.asset_id ? filteredAssets.find((a) => {
+          const assetData = a.toJSON ? a.toJSON() : a;
+          return assetData.id === tenantUnit.asset_id;
+        }) : null);
+
+        if (!asset) return null;
+
+        const assetData = asset.toJSON ? asset.toJSON() : asset;
+        if (assetId && assetId !== 'all' && assetData.id !== assetId) return null;
+
+        return { assetData, tenantUnit };
+      };
+
+      let legalPlaceholderId = -1;
+
+      for (const tenantData of tenantsInLegalScope) {
         try {
-          const tenantData = tenant.toJSON ? tenant.toJSON() : tenant;
-          // Get tenant units for this tenant
-          const tenantUnits = await this.tenantUnitRepository.getByTenantID(tenantData.id);
-          const tenantUnitIds = tenantUnits.map(tu => tu.unit_id || tu.get?.('unit_id') || tu.toJSON?.()?.unit_id);
-          const tenantUnitsWithDetails = await Promise.all(
-            tenantUnitIds.map(id => this.unitRepository.findById(id))
-          );
-          tenantData.units = tenantUnitsWithDetails.filter(u => u !== null);
-          
+          const context = resolveTenantAssetContext(tenantData);
+          if (!context) continue;
+
+          const { assetData, tenantUnit } = context;
           const legals = await this.tenantLegalRepository.findByTenantId(tenantData.id, ctx);
           const legalArray = Array.isArray(legals) ? legals : [];
-          
-          const tenantUnitsForLegal = tenantData.units && Array.isArray(tenantData.units) ? tenantData.units : [];
-          
+
+          let addedLegalRow = false;
           legalArray.forEach((legal) => {
             const legalData = legal.toJSON ? legal.toJSON() : legal;
-            if (!legalData.due_date) return;
-            
-            const dueDate = new Date(legalData.due_date);
-            const dueDay = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
-            const tenantUnit = tenantUnitsForLegal[0];
-            const asset = tenantUnit?.asset || (tenantUnit?.asset_id ? filteredAssets.find(a => {
-              const assetData = a.toJSON ? a.toJSON() : a;
-              return assetData.id === tenantUnit.asset_id;
-            }) : null);
-            
-            if (!asset) return;
-            
-            const assetData = asset.toJSON ? asset.toJSON() : asset;
-            if (assetId && assetId !== 'all' && assetData.id !== assetId) return;
-            
+            const dueDate = legalData.due_date ? new Date(legalData.due_date) : null;
+
             legalTableData.push({
               id: legalData.id,
               tenantId: tenantData.id,
@@ -1134,12 +1143,14 @@ class DashboardUsecase {
               nama: tenantData.name || '-',
               aset: assetData.name || '-',
               unit: tenantUnit?.name || '-',
-              jatuhTempo: dueDate.toLocaleDateString('id-ID', {
-                day: 'numeric',
-                month: 'long',
-                year: 'numeric'
-              }),
-              dueDateIso: dueDate.toISOString(),
+              jatuhTempo: dueDate
+                ? dueDate.toLocaleDateString('id-ID', {
+                  day: 'numeric',
+                  month: 'long',
+                  year: 'numeric'
+                })
+                : '—',
+              dueDateIso: dueDate ? dueDate.toISOString() : null,
               kewajibanMitra: legalData.keterangan || legalData.doc_type || '-',
               progress: 0,
               dokumen: legalData.keterangan || legalData.doc_type || '-',
@@ -1147,9 +1158,30 @@ class DashboardUsecase {
               status: legalData.status || '',
               tipe: 'legal'
             });
+            addedLegalRow = true;
           });
+
+          if (!addedLegalRow) {
+            legalTableData.push({
+              id: legalPlaceholderId,
+              tenantId: tenantData.id,
+              description: null,
+              nama: tenantData.name || '-',
+              aset: assetData.name || '-',
+              unit: tenantUnit?.name || '-',
+              jatuhTempo: '—',
+              dueDateIso: null,
+              kewajibanMitra: 'Belum ada dokumen legal',
+              progress: 0,
+              dokumen: '—',
+              dokumenUrl: null,
+              status: 'tanpa_dokumen',
+              tipe: 'legal'
+            });
+            legalPlaceholderId -= 1;
+          }
         } catch (err) {
-          ctx.log?.warn({ tenantId: tenant.id, error: err.message }, 'Error loading legal for tenant');
+          ctx.log?.warn({ tenantId: tenantData.id, error: err.message }, 'Error loading legal for tenant');
         }
       }
       

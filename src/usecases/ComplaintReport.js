@@ -8,6 +8,11 @@ const {
 } = require('../models/ComplaintReport');
 const { transformEvidenceUrls, transformImageUrl } = require('../services/baseUrl');
 
+function normalizePhotoEvidenceUrl(url) {
+  const trimmed = url?.trim();
+  return trimmed ? transformImageUrl(trimmed) : null;
+}
+
 class ComplaintReportUsecase {
   constructor(complaintReportRepository, userRepository, tenantRepository, complaintReportEvidenceRepository, complaintReportLogRepository, userAssetRepository) {
     this.complaintReportRepository = complaintReportRepository;
@@ -147,7 +152,7 @@ class ComplaintReportUsecase {
           ...log,
           old_status: log.old_status !== null ? ComplaintReportStatusIntToStr[log.old_status] : null,
           new_status: ComplaintReportStatusIntToStr[log.new_status],
-          photo_evidence_url: log.photo_evidence_url ? transformImageUrl(log.photo_evidence_url) : log.photo_evidence_url,
+          photo_evidence_url: normalizePhotoEvidenceUrl(log.photo_evidence_url),
         }));
       }
       
@@ -236,7 +241,7 @@ class ComplaintReportUsecase {
             ...log,
             old_status: log.old_status !== null ? ComplaintReportStatusIntToStr[log.old_status] : null,
             new_status: ComplaintReportStatusIntToStr[log.new_status],
-            photo_evidence_url: log.photo_evidence_url ? transformImageUrl(log.photo_evidence_url) : log.photo_evidence_url,
+            photo_evidence_url: normalizePhotoEvidenceUrl(log.photo_evidence_url),
           }));
         }
         
@@ -284,10 +289,7 @@ class ComplaintReportUsecase {
         throw new Error('Notes are required');
       }
 
-      // Photo evidence is required
-      if (!data.status_update_photo_evidence || !data.status_update_photo_evidence.trim()) {
-        throw new Error('Photo evidence is required');
-      }
+      const photoEvidence = data.status_update_photo_evidence?.trim() ?? '';
 
       // Convert status from string to int if provided
       const oldStatus = existing.status;
@@ -321,8 +323,20 @@ class ComplaintReportUsecase {
             old_status: oldStatus,
             new_status: newStatus,
             notes: data.status_update_notes,
-            photo_evidence_url: data.status_update_photo_evidence,
+            photo_evidence_url: photoEvidence,
             created_by: ctx.userId,
+          }, transactionCtx, tx);
+        }
+
+        // When resolving with photo, also add it to complaint evidences for detail view
+        if (
+          newStatus === ComplaintReportStatusStrToInt.resolved &&
+          photoEvidence &&
+          this.complaintReportEvidenceRepository
+        ) {
+          await this.complaintReportEvidenceRepository.create({
+            complaint_report_id: id,
+            url: photoEvidence,
           }, transactionCtx, tx);
         }
         
@@ -342,7 +356,7 @@ class ComplaintReportUsecase {
             ...log,
             old_status: log.old_status !== null ? ComplaintReportStatusIntToStr[log.old_status] : null,
             new_status: ComplaintReportStatusIntToStr[log.new_status],
-            photo_evidence_url: log.photo_evidence_url ? transformImageUrl(log.photo_evidence_url) : log.photo_evidence_url,
+            photo_evidence_url: normalizePhotoEvidenceUrl(log.photo_evidence_url),
           }));
         }
         
@@ -413,7 +427,7 @@ class ComplaintReportUsecase {
         ...log,
         old_status: log.old_status !== null ? ComplaintReportStatusIntToStr[log.old_status] : null,
         new_status: ComplaintReportStatusIntToStr[log.new_status],
-        photo_evidence_url: log.photo_evidence_url ? transformImageUrl(log.photo_evidence_url) : log.photo_evidence_url,
+        photo_evidence_url: normalizePhotoEvidenceUrl(log.photo_evidence_url),
       }));
 
       return convertedLogs;

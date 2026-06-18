@@ -214,17 +214,14 @@ function InitComplaintReportRouter(complaintReportUsecase) {
         status_update_notes: req.body.notes,
       };
 
-      // Handle file upload for photo evidence
+      // Handle optional file upload for photo evidence (empty string when not provided)
+      updateData.status_update_photo_evidence = '';
       if (req.file) {
         const host = req.protocol + '://' + req.get('host');
         const fileUrl = `${host}/uploads/complaint-report-status/${req.file.filename}`;
         updateData.status_update_photo_evidence = fileUrl;
-      } else if (req.body.photo_evidence && typeof req.body.photo_evidence === 'string') {
-        // If photo_evidence is provided as a string (URL), use it directly
+      } else if (req.body.photo_evidence !== undefined && typeof req.body.photo_evidence === 'string') {
         updateData.status_update_photo_evidence = req.body.photo_evidence;
-      } else {
-        // Photo evidence is required
-        return res.status(400).json(createResponse(null, 'Photo evidence is required', 400));
       }
 
       const updated = await complaintReportUsecase.updateComplaintReport(req.params.id, updateData, {
@@ -239,7 +236,6 @@ function InitComplaintReportRouter(complaintReportUsecase) {
         return res.status(404).json(createResponse(null, 'Complaint/Report not found', 404));
       }
       if (error.message === 'Notes are required' || 
-          error.message === 'Photo evidence is required' ||
           error.message === 'Only status can be updated') {
         return res.status(400).json(createResponse(null, error.message, 400));
       }

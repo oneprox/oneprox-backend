@@ -268,6 +268,10 @@ class UserTaskRepository {
         routineLatestBatchOnly && isSameCalendarDay;
 
       const shouldUseLatestCode = !hasDateFilter && Boolean(latestCode);
+      const routineLookbackStart = moment()
+        .tz('Asia/Jakarta')
+        .subtract(48, 'hours')
+        .toDate();
 
       let whereClause;
       if (useRoutineLatestBatch) {
@@ -285,7 +289,13 @@ class UserTaskRepository {
           };
         }
       } else if (shouldUseLatestCode) {
-        whereClause = { user_id: userId, code: latestCode, ...dateFilter };
+        // Halaman pekerjaan: ambil batch rutin ~48 jam terakhir agar shift malam
+        // yang masih aktif tidak hilang saat batch shift berikutnya sudah di-generate.
+        whereClause = {
+          user_id: userId,
+          is_routine: true,
+          created_at: { [Op.gte]: routineLookbackStart },
+        };
       } else if (hasDateFilter) {
         whereClause = { user_id: userId, ...dateFilter };
       } else {
@@ -1203,27 +1213,26 @@ class UserTaskRepository {
           const [endH, endM] = firstTaskGroup.end_time.split(':').map(Number);
           const endMinutes = endH * 60 + endM;
           
-          // Determine the start and end of the upcoming shift period
-          // (the shift that's about to start, since we're generating 1 hour before)
-          let shiftStart, shiftEnd;
-          
-          // Since current time is before start_time (we're 1 hour before), the upcoming shift starts today
-          if (endMinutes < startMinutes) {
-            // Shift spans midnight (e.g., 19:00 to 04:00)
-            // If we're generating before start_time, the shift starts today and ends tomorrow
+          // Tentukan jendela shift target (shift yang sedang / akan di-generate)
+          let shiftStart;
+          let shiftEnd;
+          const crossesMidnight = endMinutes <= startMinutes;
+
+          if (crossesMidnight && currentMinutes <= endMinutes) {
+            // Dini hari: shift malam yang dimulai kemarin masih berjalan (mis. 06:00 untuk 19:00–07:00)
+            shiftStart = now.clone().subtract(1, 'day').startOf('day').add(startMinutes, 'minutes');
+            shiftEnd = now.clone().startOf('day').add(endMinutes, 'minutes');
+          } else if (crossesMidnight) {
+            // Shift malam dimulai hari ini, berakhir besok
             shiftStart = now.clone().startOf('day').add(startMinutes, 'minutes');
             shiftEnd = now.clone().add(1, 'day').startOf('day').add(endMinutes, 'minutes');
           } else {
-            // Normal shift within same day
-            // Shift starts today
             shiftStart = now.clone().startOf('day').add(startMinutes, 'minutes');
             shiftEnd = now.clone().startOf('day').add(endMinutes, 'minutes');
           }
-          
-          // Check if tasks were already generated for this upcoming shift
-          // We check for tasks created in a window around the shift start time
-          // (from 2 hours before shift start to shift end, to catch any early generation)
-          const checkWindowStart = shiftStart.clone().subtract(2, 'hours');
+
+          // Cek duplikat: dari beforeWindow sebelum start shift sampai akhir shift
+          const checkWindowStart = shiftStart.clone().subtract(beforeWindowMinutes, 'minutes');
           const checkWindowEnd = shiftEnd.clone();
           
           const existingUserTasks = await this.userTaskModel.findAll({

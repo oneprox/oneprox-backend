@@ -231,7 +231,7 @@ const assetUsecase = new assetUc(
 const authUsecase = new authUc(
   userRepository,
   process.env.JWT_SECRET,
-  process.env.TOKEN_TTL || '1h',
+  process.env.TOKEN_TTL || '365d',
   process.env.APP_BASE_URL || 'http://localhost:3000',
   tokenRepository,
   roleRepository,

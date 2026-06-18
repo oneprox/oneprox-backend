@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const { sendPasswordResetEmail } = require('../services/Mailer');
 
 class AuthUsecase {
-  constructor(userRepository, jwtSecret, tokenTtl = '1h', appBaseUrl, tokenRepository, roleRepository, userAssetRepository) {
+  constructor(userRepository, jwtSecret, tokenTtl = '365d', appBaseUrl, tokenRepository, roleRepository, userAssetRepository) {
     this.userRepository = userRepository;
     this.jwtSecret = jwtSecret;
     this.tokenTtl = tokenTtl;

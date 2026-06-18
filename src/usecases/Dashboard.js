@@ -5,6 +5,60 @@ const {
 } = require('../models/ComplaintReport');
 const { nonRoutineDueEndMoment, parseNonRoutineNotes } = require('../utils/nonRoutineDue');
 
+const FINANCIAL_PAYMENT_STATUS_ORDER = {
+  overdue: 0,
+  reminder_needed: 1,
+  scheduled: 2,
+  paid: 3,
+};
+
+function daysLeftFromDeadline(deadline, now = new Date()) {
+  const dl = deadline ? new Date(deadline) : null;
+  if (!dl || Number.isNaN(dl.getTime())) return null;
+  const ms = dl.getTime() - now.getTime();
+  return Math.ceil(ms / (24 * 60 * 60 * 1000));
+}
+
+/**
+ * @returns {'paid' | 'scheduled' | 'reminder_needed' | 'overdue'}
+ */
+function calculatePaymentStatus(deadline, now = new Date(), paymentTerm = 1) {
+  if (!deadline) return 'scheduled';
+
+  const dl = deadline ? new Date(deadline) : null;
+  if (!dl || Number.isNaN(dl.getTime())) return 'scheduled';
+
+  const left = daysLeftFromDeadline(dl, now);
+  if (left === null) return 'scheduled';
+
+  if (left < 0) return 'overdue';
+
+  let reminderDays = 7;
+  if (paymentTerm === 0) reminderDays = 90;
+  else if (paymentTerm === 1) reminderDays = 7;
+
+  if (left <= reminderDays) return 'reminder_needed';
+
+  return 'scheduled';
+}
+
+function compareFinancialTableRows(a, b) {
+  const pa = FINANCIAL_PAYMENT_STATUS_ORDER[a.status] ?? 99;
+  const pb = FINANCIAL_PAYMENT_STATUS_ORDER[b.status] ?? 99;
+  if (pa !== pb) return pa - pb;
+
+  if (a.status === 'overdue' && b.status === 'overdue') {
+    return (b.aging || 0) - (a.aging || 0);
+  }
+
+  const ta = a.dueDateIso ? new Date(a.dueDateIso).getTime() : Infinity;
+  const tb = b.dueDateIso ? new Date(b.dueDateIso).getTime() : Infinity;
+  if (Number.isNaN(ta) && Number.isNaN(tb)) return 0;
+  if (Number.isNaN(ta)) return 1;
+  if (Number.isNaN(tb)) return -1;
+  return ta - tb;
+}
+
 class DashboardUsecase {
   constructor(
     complaintReportRepository,
@@ -1249,22 +1303,26 @@ class DashboardUsecase {
               return;
             }
             
-            // Hanya belum dibayar (status 0) + jatuh tempo sudah diisi
+            // Semua invoice (sudah dibayar & belum) — jatuh tempo wajib diisi
             const st = paymentData.status;
-            const isUnpaid = st === 0 || st === '0' || st === 'unpaid';
-            if (!isUnpaid) return;
+            const isPaid = st === 1 || st === '1' || st === 'paid';
 
             const deadline = paymentData.payment_deadline ? new Date(paymentData.payment_deadline) : null;
             if (!deadline || Number.isNaN(deadline.getTime())) return;
-            const aging = Math.floor((now.getTime() - deadline.getTime()) / (1000 * 60 * 60 * 24));
 
-            let status = 'On Process';
-            const daysUntilDeadline = Math.floor((deadline.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-            if (daysUntilDeadline < 0) {
-              status = 'Overdue';
-            } else if (daysUntilDeadline <= 30) {
-              status = 'On Process';
-            }
+            const paymentTerm =
+              tenantData.payment_term !== undefined && tenantData.payment_term !== null
+                ? tenantData.payment_term
+                : 1;
+
+            const status = isPaid
+              ? 'paid'
+              : calculatePaymentStatus(deadline, now, paymentTerm);
+
+            const daysPastDue = Math.floor(
+              (now.getTime() - deadline.getTime()) / (1000 * 60 * 60 * 24)
+            );
+            const aging = !isPaid && status === 'overdue' && daysPastDue > 0 ? daysPastDue : 0;
 
             const deskripsi = paymentData.billing_type || paymentData.billing_period || 'Tagihan Sewa';
 
@@ -1329,15 +1387,8 @@ class DashboardUsecase {
         }
       }
       
-      // Sort by deadline (dueDateIso) ascending
-      financialTableData.sort((a, b) => {
-        const ta = a.dueDateIso ? new Date(a.dueDateIso).getTime() : NaN;
-        const tb = b.dueDateIso ? new Date(b.dueDateIso).getTime() : NaN;
-        if (Number.isNaN(ta) && Number.isNaN(tb)) return 0;
-        if (Number.isNaN(ta)) return 1;
-        if (Number.isNaN(tb)) return -1;
-        return ta - tb;
-      });
+      // Urutan: overdue → reminder_needed → scheduled → paid
+      financialTableData.sort(compareFinancialTableRows);
       
       return financialTableData;
     } catch (error) {

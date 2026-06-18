@@ -178,6 +178,7 @@ describe('Tanpa Bearer — route terlindungi JWT → 401', () => {
     ['/api/roles', 'POST'],
     ['/api/settings', 'POST'],
     [`/api/tenants/${U}/payments`, 'POST'],
+    [`/api/tenants/${U}/deposito-logs`, 'POST'],
     [`/api/tenants/${U}/legals`, 'POST'],
     ['/api/uploads/general', 'POST'],
   ];
@@ -205,6 +206,7 @@ describe('Tanpa Bearer — route terlindungi JWT → 401', () => {
     ['/api/user-tasks/1/start', 'PUT'],
     ['/api/user-tasks/1/complete', 'PUT'],
     [`/api/tenants/${U}/payments/1`, 'PUT'],
+    [`/api/tenants/${U}/deposito-logs/1`, 'PUT'],
     [`/api/tenants/${U}/legals/1`, 'PUT'],
   ];
 
@@ -227,6 +229,7 @@ describe('Tanpa Bearer — route terlindungi JWT → 401', () => {
     [`/api/complaint-reports/${U}`, 'DELETE'],
     ['/api/settings/1', 'DELETE'],
     [`/api/tenants/${U}/payments/1`, 'DELETE'],
+    [`/api/tenants/${U}/deposito-logs/1`, 'DELETE'],
     [`/api/tenants/${U}/legals/1`, 'DELETE'],
   ];
 

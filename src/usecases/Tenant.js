@@ -1233,19 +1233,6 @@ class TenantUseCase {
           );
         }
 
-        if (data.deposit !== undefined && data.deposit !== oldTenant.deposit) {
-          await this.depositoLogRepository.create(
-            {
-              tenant_id: id,
-              old_deposit: oldTenant.deposit,
-              new_deposit: data.deposit,
-              reason: data.deposit_reason || null,
-              created_by: ctx.userId,
-            },
-            txCtx
-          );
-        }
-
         return updatedTenant;
       });
 
@@ -1313,17 +1300,6 @@ class TenantUseCase {
     ctx.log?.info({ tenant_id: id }, "TenantUsecase.getTenantLogs");
     let tenantLogs = await this.tenantLogRepository.findByTenantID(id, ctx);
     return tenantLogs;
-  }
-
-  async getDepositoLogs(id, ctx) {
-    try {
-      ctx.log?.info({ tenant_id: id }, "TenantUsecase.getDepositoLogs");
-      const depositoLogs = await this.depositoLogRepository.findByTenantId(id, ctx);
-      return depositoLogs;
-    } catch (error) {
-      ctx.log?.error({ tenant_id: id, error: error.message }, "TenantUsecase.getDepositoLogs_error");
-      throw error;
-    }
   }
 
   async tenantToJson(tenant) {

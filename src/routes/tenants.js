@@ -4,7 +4,7 @@ const { authMiddleware, ensureRole } = require('../middleware/auth');
 const { createResponse } = require('../services/response');
 const { errorMessage } = require('../utils/errorMessage');
 
-function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUsecase) {
+function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUsecase, DepositoLogUsecase) {
   const router = Router();
 
   router.use(authMiddleware, ensureRole);
@@ -200,28 +200,177 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
   });
 
   router.get('/:id/deposito-logs', [
-    param('id').isUUID().withMessage('ID must be a valid UUID')
+    param('id').isUUID().withMessage('ID must be a valid UUID'),
+    query('limit').optional().isInt({ min: 1 }).withMessage('limit must be a positive integer'),
+    query('offset').optional().isInt({ min: 0 }).withMessage('offset must be a non-negative integer'),
+    query('orderBy').optional().isIn(['deposit_date', 'amount', 'created_at']).withMessage('orderBy must be deposit_date, amount, or created_at'),
+    query('order').optional().isIn(['ASC', 'DESC', 'asc', 'desc']).withMessage('order must be ASC or DESC'),
   ], async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json(createResponse(null, "bad request", 400, false, {}, errors));
     }
-    
+
     try {
-      req.log?.info({ tenant_id: req.params.id }, "TenantRouter.getDepositoLogs");
-      const depositoLogs = await TenantUseCase.getDepositoLogs(req.params.id, {
+      req.log?.info({ tenant_id: req.params.id, query: req.query }, "TenantRouter.getDepositoLogs");
+      const result = await DepositoLogUsecase.getDepositoLogsByTenantId(req.params.id, {
+        limit: req.query.limit || 10,
+        offset: req.query.offset || 0,
+        orderBy: req.query.orderBy || 'deposit_date',
+        order: req.query.order || 'DESC',
+      }, {
         userId: req.auth.userId,
-        log: req.log
+        log: req.log,
       });
 
-      res.status(200).json(createResponse(depositoLogs, "success", 200, true, {
-        total: depositoLogs.length,
-        limit: depositoLogs.length,
-        offset: 0
+      res.status(200).json(createResponse(result.rows, "success", 200, true, {
+        total: result.count,
+        limit: result.limit,
+        offset: result.offset,
       }));
     } catch (err) {
       req.log?.error({ tenant_id: req.params.id }, `TenantRouter.getDepositoLogs_error: ${err.message}`);
-      res.status(500).json(createResponse(null, "internal server error", 500));
+      if (err.message === 'Tenant not found') {
+        res.status(404).json(createResponse(null, "Tenant not found", 404));
+      } else {
+        res.status(500).json(createResponse(null, "internal server error", 500));
+      }
+    }
+  });
+
+  router.post('/:id/deposito-logs', [
+    param('id').isUUID().withMessage('ID must be a valid UUID'),
+    body('deposit_date').isISO8601().withMessage('deposit_date must be a valid date'),
+    body('amount')
+      .isFloat()
+      .withMessage('amount must be a number')
+      .custom((value) => {
+        const n = Number(value);
+        if (Number.isNaN(n) || n === 0) {
+          throw new Error('amount must not be 0');
+        }
+        return true;
+      }),
+    body('notes').optional().isString(),
+  ], async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json(createResponse(null, "bad request", 400, false, {}, errors));
+    }
+
+    try {
+      req.log?.info({ tenant_id: req.params.id, body: req.body }, "TenantRouter.createDepositoLog");
+      const depositoLog = await DepositoLogUsecase.createDepositoLog({
+        tenant_id: req.params.id,
+        deposit_date: req.body.deposit_date,
+        amount: req.body.amount,
+        notes: req.body.notes,
+      }, {
+        userId: req.auth.userId,
+        log: req.log,
+      });
+
+      res.status(201).json(createResponse(depositoLog, "Deposit log created successfully", 201));
+    } catch (err) {
+      req.log?.error({ tenant_id: req.params.id }, `TenantRouter.createDepositoLog_error: ${err.message}`);
+      if (err.message === 'Tenant not found') {
+        res.status(404).json(createResponse(null, "Tenant not found", 404));
+      } else if (err.message === 'amount must not be 0') {
+        res.status(400).json(createResponse(null, err.message, 400));
+      } else {
+        res.status(500).json(createResponse(null, "internal server error", 500));
+      }
+    }
+  });
+
+  router.put('/:id/deposito-logs/:logId', [
+    param('id').isUUID().withMessage('Tenant ID must be a valid UUID'),
+    param('logId').isInt({ min: 1 }).withMessage('Log ID must be a valid integer'),
+    body('deposit_date').optional().isISO8601().withMessage('deposit_date must be a valid date'),
+    body('amount')
+      .optional()
+      .isFloat()
+      .withMessage('amount must be a number')
+      .custom((value) => {
+        const n = Number(value);
+        if (Number.isNaN(n) || n === 0) {
+          throw new Error('amount must not be 0');
+        }
+        return true;
+      }),
+    body('notes').optional().isString(),
+  ], async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json(createResponse(null, "bad request", 400, false, {}, errors));
+    }
+
+    try {
+      req.log?.info({
+        tenant_id: req.params.id,
+        log_id: req.params.logId,
+        body: req.body,
+      }, "TenantRouter.updateDepositoLog");
+
+      const updatedDepositoLog = await DepositoLogUsecase.updateDepositoLog(
+        req.params.logId,
+        req.params.id,
+        req.body,
+        {
+          userId: req.auth.userId,
+          log: req.log,
+        }
+      );
+
+      res.status(200).json(createResponse(updatedDepositoLog, "Deposit log updated successfully", 200));
+    } catch (err) {
+      req.log?.error({
+        tenant_id: req.params.id,
+        log_id: req.params.logId,
+      }, `TenantRouter.updateDepositoLog_error: ${err.message}`);
+
+      if (err.message === 'Deposit log not found') {
+        res.status(404).json(createResponse(null, "Deposit log not found", 404));
+      } else if (err.message === 'amount must not be 0') {
+        res.status(400).json(createResponse(null, err.message, 400));
+      } else {
+        res.status(500).json(createResponse(null, "internal server error", 500));
+      }
+    }
+  });
+
+  router.delete('/:id/deposito-logs/:logId', [
+    param('id').isUUID().withMessage('Tenant ID must be a valid UUID'),
+    param('logId').isInt({ min: 1 }).withMessage('Log ID must be a valid integer'),
+  ], async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json(createResponse(null, "bad request", 400, false, {}, errors));
+    }
+
+    try {
+      req.log?.info({
+        tenant_id: req.params.id,
+        log_id: req.params.logId,
+      }, "TenantRouter.deleteDepositoLog");
+
+      await DepositoLogUsecase.deleteDepositoLog(req.params.logId, req.params.id, {
+        userId: req.auth.userId,
+        log: req.log,
+      });
+
+      res.status(200).json(createResponse(null, "Deposit log deleted successfully", 200));
+    } catch (err) {
+      req.log?.error({
+        tenant_id: req.params.id,
+        log_id: req.params.logId,
+      }, `TenantRouter.deleteDepositoLog_error: ${err.message}`);
+
+      if (err.message === 'Deposit log not found') {
+        res.status(404).json(createResponse(null, "Deposit log not found", 404));
+      } else {
+        res.status(500).json(createResponse(null, "internal server error", 500));
+      }
     }
   });
 

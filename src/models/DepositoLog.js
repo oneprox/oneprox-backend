@@ -13,15 +13,16 @@ DepositoLog.init({
     type: DataTypes.UUID,
     allowNull: false,
   },
-  old_deposit: {
-    type: DataTypes.FLOAT,
-    allowNull: true,
-  },
-  new_deposit: {
-    type: DataTypes.FLOAT,
+  deposit_date: {
+    type: DataTypes.DATEONLY,
     allowNull: false,
   },
-  reason: {
+  amount: {
+    type: DataTypes.FLOAT,
+    allowNull: false,
+    comment: 'Signed amount: positive = credit, negative = debit',
+  },
+  notes: {
     type: DataTypes.TEXT,
     allowNull: true,
   },
@@ -32,6 +33,14 @@ DepositoLog.init({
   created_at: {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW,
+  },
+  updated_by: {
+    type: DataTypes.UUID,
+    allowNull: true,
+  },
+  updated_at: {
+    type: DataTypes.DATE,
+    allowNull: true,
   },
 }, {
   sequelize,
@@ -49,7 +58,10 @@ DepositoLog.associate = (models) => {
     foreignKey: 'created_by',
     as: 'createdBy',
   });
+  DepositoLog.belongsTo(models.User, {
+    foreignKey: 'updated_by',
+    as: 'updatedBy',
+  });
 };
 
 module.exports = DepositoLog;
-

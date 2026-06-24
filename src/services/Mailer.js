@@ -207,9 +207,10 @@ async function sendTenantPaymentDueSoonEmail({ to, tenantName, tenantCode, payme
   // Payment instructions and contact info from environment variables
   const bankAccount = process.env.PAYMENT_BANK_ACCOUNT || '1234567890';
   const bankAccountName = process.env.PAYMENT_BANK_ACCOUNT_NAME || 'PT Peruri Property';
-  const paymentEmail = process.env.PAYMENT_EMAIL || 'payment@peruriproperty.com';
+  const paymentEmail = process.env.PAYMENT_EMAIL || 'finance.pproperti@gmail.com';
   const supportEmail = process.env.SUPPORT_EMAIL || 'support@peruriproperty.com';
-  const supportPhone = process.env.SUPPORT_PHONE || '+62 21 1234 5678';
+  const supportPhone = process.env.SUPPORT_PHONE || '+62 821 1112 3433';
+  const supportName = process.env.SUPPORT_NAME || 'Sefri Khudori/ Finance';
 
   const text =
     `Halo ${safeTenant},\n\n` +
@@ -418,12 +419,7 @@ async function sendTenantPaymentDueSoonEmail({ to, tenantName, tenantCode, payme
                     </tr>
                     <tr>
                       <td style="padding: 0 0 12px;">
-                        <a href="mailto:${supportEmail}" style="font-size: 14px; color: #2563eb; text-decoration: none;">${supportEmail}</a>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td style="padding: 0;">
-                        <span style="font-size: 14px; color: #2563eb;">${supportPhone}</span>
+                        <a href="mailto:${supportEmail}" style="font-size: 14px; color: #2563eb; text-decoration: none;">${supportEmail}  | <span style="font-size: 14px; color: #2563eb;">${supportPhone} (${supportName})</span></a>
                       </td>
                     </tr>
                   </table>

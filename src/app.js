@@ -20,6 +20,7 @@ const { InitRoleRouter } = require('./routes/roles');
 const { InitMenuRouter } = require('./routes/menus');
 const { InitScanInfoRouter } = require('./routes/scanInfos');
 const { InitTaskGroupRouter } = require('./routes/taskGroups');
+const { InitBankRouter } = require('./routes/banks');
 const { InitComplaintReportRouter } = require('./routes/complaintReports');
 const { InitInternalRouter } = require('./routes/internal');
 const { InitSettingsRouter } = require('./routes/settings');
@@ -57,6 +58,7 @@ const TaskRepository = require('./repositories/Task');
 const TaskScheduleRepository = require('./repositories/TaskSchedule');
 const TaskLogRepository = require('./repositories/TaskLog');
 const TaskGroupRepository = require('./repositories/TaskGroup');
+const BankRepository = require('./repositories/Bank');
 const TaskParentRepository = require('./repositories/TaskParent');
 const ScanInfoRepository = require('./repositories/ScanInfo');
 const UserTaskRepository = require('./repositories/UserTask');
@@ -76,6 +78,7 @@ const menuUc = require('./usecases/Menu');
 const userAccessMenuUc = require('./usecases/UserAccessMenu');
 const taskUc = require('./usecases/Task');
 const taskGroupUc = require('./usecases/TaskGroup');
+const bankUc = require('./usecases/Bank');
 const userTaskUc = require('./usecases/UserTask');
 const scanInfoUc = require('./usecases/ScanInfo');
 const complaintReportUc = require('./usecases/ComplaintReport');
@@ -116,6 +119,7 @@ const modelTaskSchedule = require('./models/TaskSchedule');
 const modelTaskLog = require('./models/TaskLog');
 const modelScanInfo = require('./models/ScanInfo');
 const modelTaskGroup = require('./models/TaskGroup');
+const modelBank = require('./models/Bank');
 const modelTaskParent = require('./models/TaskParent');
 const modelUserTask = require('./models/UserTask');
 const modelUserTaskEvidence = require('./models/UserTaskEvidence');
@@ -130,7 +134,7 @@ const assetRepository = new AssetRepository(Asset, modelAdminAsset, User);
 const assetLogRepository = new AssetLogRepository(modelAssetLog, User);
 const unitRepository = new UnitRepository(modelUnit, Asset, User);
 const roleRepository = new RoleRepository(modelRole, modelRoleMenuPermission);
-const tenantRepository = new TenantRepository(Tenant, User, modelTenantCategory);
+const tenantRepository = new TenantRepository(Tenant, User, modelTenantCategory, modelBank);
 const tenantAttachmentRepository = new TenantAttachmentRepository(TenantAttachmentModel)
 const mapTenantCategoryRepository = new MapTenantCategoryRepository(MapTenantCategory)
 const tenantUnitRepository = new TenantUnitRepository(modelTenantUnit)
@@ -152,6 +156,7 @@ const taskRepository = new TaskRepository(modelTask, User, modelRole, Asset, mod
 const taskScheduleRepository = new TaskScheduleRepository(modelTaskSchedule);
 const taskLogRepository = new TaskLogRepository(modelTaskLog, User);
 const taskGroupRepository = new TaskGroupRepository(modelTaskGroup, modelTask, modelUserTask, modelTaskParent, User);
+const bankRepository = new BankRepository(modelBank, Tenant);
 const taskParentRepository = new TaskParentRepository(modelTaskParent);
 const scanInfoRepository = new ScanInfoRepository(modelScanInfo, User, Asset);
 const settingsRepository = new SettingsRepository(Settings);
@@ -201,6 +206,7 @@ const models = {
   TaskLog: modelTaskLog,
   ScanInfo: modelScanInfo,
   TaskGroup: modelTaskGroup,
+  Bank: modelBank,
   TaskParent: modelTaskParent,
   UserTask: modelUserTask,
   UserTaskEvidence: modelUserTaskEvidence,
@@ -245,6 +251,7 @@ const menuUsecase = new menuUc(menuRepository);
 const userAccessMenuUsecase = new userAccessMenuUc(userAccessMenuRepository);
 const taskUsecase = new taskUc(taskRepository, taskScheduleRepository, taskLogRepository, taskParentRepository);
 const taskGroupUsecase = new taskGroupUc(taskGroupRepository);
+const bankUsecase = new bankUc(bankRepository);
 const userTaskUsecase = new userTaskUc(
   userTaskRepository,
   taskRepository,
@@ -294,6 +301,7 @@ const attendanceRouter = InitAttendanceRouter(attendanceUsecase);
 const uploadFileRouter = uploadsRouter.InitUploadRouter();
 const taskRouter = taskRoute.InitTaskRouter(taskUsecase);
 const taskGroupRouter = InitTaskGroupRouter(taskGroupUsecase);
+const bankRouter = InitBankRouter(bankUsecase);
 const scanInfoRouter = InitScanInfoRouter(scanInfoUsecase);
 const complaintReportRouter = InitComplaintReportRouter(complaintReportUsecase);
 const userTaskRouter = require('./routes/userTasks').InitUserTaskRouter(userTaskUsecase);
@@ -460,6 +468,7 @@ app.use('/api/units', unitRouter);
 app.use('/api/tenants', tenantRouter);
 app.use('/api/tasks', taskRouter);
 app.use('/api/task-groups', taskGroupRouter);
+app.use('/api/banks', bankRouter);
 app.use('/api/roles', roleRouter);
 app.use('/api/menus', menuRouter);
 app.use('/api/uploads', uploadFileRouter);

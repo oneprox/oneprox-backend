@@ -153,6 +153,9 @@ class TenantUseCase {
           land_area: data.land_area || null,
           electricity_power: data.electricity_power || null,
           category_id: categoryId,
+          bank_id: data.bank_id !== undefined && data.bank_id !== null && data.bank_id !== ''
+            ? data.bank_id
+            : null,
           sub_category: data.sub_category && typeof data.sub_category === 'string' ? data.sub_category.trim() : null,
           status: this.getTenantStatusInt(data.status) ?? 1, // Default to active (1)
         };
@@ -1092,6 +1095,12 @@ class TenantUseCase {
             data.sub_category && typeof data.sub_category === 'string'
               ? data.sub_category.trim() || null
               : null;
+        }
+        if (data.bank_id !== undefined) {
+          updatePayload.bank_id =
+            data.bank_id === null || data.bank_id === ''
+              ? null
+              : data.bank_id;
         }
         if (data.payment_term !== undefined) updatePayload.payment_term = data.payment_term;
         if (data.building_area !== undefined) updatePayload.building_area = data.building_area;

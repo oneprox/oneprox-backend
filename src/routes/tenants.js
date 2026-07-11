@@ -38,6 +38,7 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
       body('new_user.phone').optional(),
       body('new_user.gender').optional(),
       body('category').isString().notEmpty().withMessage('category is required'),
+      body('bank_id').optional({ nullable: true }).isInt({ min: 1 }).withMessage('Invalid bank id'),
       body('sub_category').optional().isString(),
       body('status').optional().isIn(['inactive', 'active', 'pending', 'expired', 'terminated', 'blacklisted', '0', '1', '2', '3', '4', '5']).withMessage('status must be one of: inactive, active, pending, expired, terminated, blacklisted, or 0, 1, 2, 3, 4, 5'),
     ],
@@ -77,6 +78,7 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
         electricity_power,
         category,
         sub_category,
+        bank_id,
         user_id,
         new_user,
         status,
@@ -86,7 +88,7 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
       console.log("TenantRouter.createTenant - extracted new_user:", new_user);
 
       const tenant = await TenantUseCase.createTenant({
-        name, tenant_identifications, contract_documents, contract_begin_at, contract_end_at, unit_ids, asset_ids, building_type, payment_term, rent_price, ppn, building_area, land_area, electricity_power, user_id, new_user, category, sub_category, status, createdBy: req.auth.userId
+        name, tenant_identifications, contract_documents, contract_begin_at, contract_end_at, unit_ids, asset_ids, building_type, payment_term, rent_price, ppn, building_area, land_area, electricity_power, user_id, new_user, category, sub_category, bank_id, status, createdBy: req.auth.userId
       }, {userId: req.auth.userId, log: req.log});
       res.status(201).json(createResponse(tenant, "success", 201));
     } catch (err) {
@@ -139,7 +141,12 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
     }
   });
 
-  router.put('/:id', async (req, res) => {
+  router.put('/:id', [
+    body('bank_id').optional({ nullable: true }).isInt({ min: 1 }).withMessage('Invalid bank id'),
+  ], async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json(createResponse(null, "bad request", 400, false, {}, errors));
+
     try {
       req.log?.info({ tenant_id: req.params.id, update_data: req.body }, "TenantRouter.updateTenant");
       const updated = await TenantUseCase.updateTenant(req.params.id, req.body, {log: req.log, userId: req.auth.userId});

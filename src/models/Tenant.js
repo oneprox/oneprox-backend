@@ -170,6 +170,10 @@ Tenant.associate = (models) => {
     foreignKey: 'category_id',
     as: 'category'
   });
+  Tenant.belongsTo(models.Bank, {
+    foreignKey: 'bank_id',
+    as: 'bank'
+  });
 }
 
 module.exports = {Tenant, DurationUnit, DurationUnitStr, TenantStatusIntToStr, TenantStatusStrToInt};

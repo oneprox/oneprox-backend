@@ -1,10 +1,11 @@
 const { Op } = require("sequelize");
 
 class TenantRepository {
-  constructor(tenantModel, userModel, tenantCategoryModel) {
+  constructor(tenantModel, userModel, tenantCategoryModel, bankModel = null) {
     this.tenantModel = tenantModel;
     this.userModel = userModel;
     this.tenantCategoryModel = tenantCategoryModel;
+    this.bankModel = bankModel;
   }
   async create(data, tx = null, ctx) {
     try {
@@ -40,6 +41,12 @@ class TenantRepository {
           model: this.tenantCategoryModel,
           as: "category",
           attributes: ["id", "name"],
+          required: false,
+        },
+        {
+          model: this.bankModel,
+          as: "bank",
+          attributes: ["id", "bank_name", "bank_account", "holder_name"],
           required: false,
         },
       ],
@@ -139,6 +146,12 @@ class TenantRepository {
           attributes: ['id', 'name'],
           required: false,
         },
+        {
+          model: this.bankModel,
+          as: 'bank',
+          attributes: ['id', 'bank_name', 'bank_account', 'holder_name'],
+          required: false,
+        },
       ]
 
       // Handle pagination
@@ -217,6 +230,7 @@ class TenantRepository {
       'rent_duration_unit',
       'sub_category',
       'category_id',
+      'bank_id',
     ]);
 
     const updateData = {};

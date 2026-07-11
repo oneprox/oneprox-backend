@@ -312,6 +312,8 @@ const internalRouter = InitInternalRouter({
   tenantPaymentLogRepository,
   userTaskEvidenceRepository,
   userTaskUsecase,
+  settingsRepository,
+  bankRepository,
 });
 const settingsRouter = InitSettingsRouter(settingsUsecase);
 

@@ -14,6 +14,42 @@ function daysLeftFromDeadline(deadline, now = new Date()) {
 }
 
 /**
+ * Resolve payment-reminder email config: paymentEmail/supportEmail/supportPhone/supportName
+ * from the `settings` table, and the company bank account from Bank master data
+ * (the active bank with the smallest id), formatted "Nama Bank - Account Number (Holder Name)".
+ * Falls back to Mailer.js's own env-var defaults when a setting/bank isn't configured.
+ */
+async function loadPaymentReminderMailConfig(settingsRepository, bankRepository, ctx = {}) {
+  const [paymentEmailSetting, supportEmailSetting, supportPhoneSetting, supportNameSetting] = await Promise.all([
+    settingsRepository ? settingsRepository.findByKey('payment_email', ctx) : null,
+    settingsRepository ? settingsRepository.findByKey('support_email', ctx) : null,
+    settingsRepository ? settingsRepository.findByKey('support_phone', ctx) : null,
+    settingsRepository ? settingsRepository.findByKey('support_name', ctx) : null,
+  ]);
+
+  let bankAccount;
+  if (bankRepository) {
+    const bankResult = await bankRepository.findAll({ is_active: true }, ctx);
+    const banks = Array.isArray(bankResult?.banks) ? bankResult.banks : [];
+    const primaryBank = banks.reduce(
+      (best, b) => (!best || Number(b.id) < Number(best.id) ? b : best),
+      null
+    );
+    if (primaryBank) {
+      bankAccount = `${primaryBank.bank_name} - ${primaryBank.bank_account} (${primaryBank.holder_name})`;
+    }
+  }
+
+  return {
+    paymentEmail: paymentEmailSetting?.value || undefined,
+    supportEmail: supportEmailSetting?.value || undefined,
+    supportPhone: supportPhoneSetting?.value || undefined,
+    supportName: supportNameSetting?.value || undefined,
+    bankAccount,
+  };
+}
+
+/**
  * Calculate payment status based on payment deadline and payment term
  * @param {Date|string|null} deadline - Payment deadline date
  * @param {Date} now - Current date (default: new Date())
@@ -190,6 +226,8 @@ function InitInternalRouter({
   tenantPaymentLogRepository,
   userTaskEvidenceRepository,
   userTaskUsecase,
+  settingsRepository,
+  bankRepository,
 }) {
   const router = Router();
 
@@ -259,6 +297,10 @@ function InitInternalRouter({
         let updatedTenants = 0;
         const tenantStatusMap = new Map(); // Track payment status per tenant
 
+        const mailConfig = (!dryRun && paymentLogs.length > 0)
+          ? await loadPaymentReminderMailConfig(settingsRepository, bankRepository, { log: req.log })
+          : {};
+
         const items = [];
         for (const pl of paymentLogs) {
           const tenant = pl.tenant || null;
@@ -314,6 +356,7 @@ function InitInternalRouter({
               amount: pl.billing_amount ?? pl.amount,
               deadline: dl,
               daysLeft: left,
+              ...mailConfig,
             });
             await tenantPaymentLogRepository.update(
               pl.id,

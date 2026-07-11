@@ -174,7 +174,20 @@ async function sendPasswordResetEmail({ to, resetUrl, userName = 'Pengguna' }) {
   await transport.sendMail(mailOptions);
 }
 
-async function sendTenantPaymentDueSoonEmail({ to, tenantName, tenantCode, paymentId, amount, deadline, daysLeft }) {
+async function sendTenantPaymentDueSoonEmail({
+  to,
+  tenantName,
+  tenantCode,
+  paymentId,
+  amount,
+  deadline,
+  daysLeft,
+  paymentEmail: paymentEmailOverride,
+  supportEmail: supportEmailOverride,
+  supportPhone: supportPhoneOverride,
+  supportName: supportNameOverride,
+  bankAccount: bankAccountOverride,
+}) {
   const { transport, from } = createTransportFromEnv();
   const logoCid = 'logo@peruriproperty';
   const logoAttachment = getLogoAttachment(logoCid);
@@ -204,13 +217,13 @@ async function sendTenantPaymentDueSoonEmail({ to, tenantName, tenantCode, payme
   const deadlineStr = formatIndonesianDate(deadline);
   const formattedAmount = formatRupiah(safeAmount);
 
-  // Payment instructions and contact info from environment variables
-  const bankAccount = process.env.PAYMENT_BANK_ACCOUNT || '1234567890';
-  const bankAccountName = process.env.PAYMENT_BANK_ACCOUNT_NAME || 'PT Peruri Property';
-  const paymentEmail = process.env.PAYMENT_EMAIL || 'finance.pproperti@gmail.com';
-  const supportEmail = process.env.SUPPORT_EMAIL || 'support@peruriproperty.com';
-  const supportPhone = process.env.SUPPORT_PHONE || '+62 821 1112 3433';
-  const supportName = process.env.SUPPORT_NAME || 'Sefri Khudori/ Finance';
+  // Payment instructions and contact info: prefer values resolved by the caller
+  // from the settings table / Bank master data, falling back to env vars.
+  const bankAccount = bankAccountOverride || process.env.PAYMENT_BANK_ACCOUNT || '1234567890';
+  const paymentEmail = paymentEmailOverride || process.env.PAYMENT_EMAIL || 'finance.pproperti@gmail.com';
+  const supportEmail = supportEmailOverride || process.env.SUPPORT_EMAIL || 'support@peruriproperty.com';
+  const supportPhone = supportPhoneOverride || process.env.SUPPORT_PHONE || '+62 821 1112 3433';
+  const supportName = supportNameOverride || process.env.SUPPORT_NAME || 'Sefri Khudori/ Finance';
 
   const text =
     `Halo ${safeTenant},\n\n` +
@@ -219,7 +232,7 @@ async function sendTenantPaymentDueSoonEmail({ to, tenantName, tenantCode, payme
     `Nominal yang harus dibayar: ${formattedAmount}\n` +
     `ID Pembayaran: ${paymentId}\n\n` +
     `Cara Pembayaran:\n` +
-    `1. Transfer ke rekening perusahaan: ${bankAccount} a.n ${bankAccountName}\n` +
+    `1. Transfer ke rekening perusahaan: ${bankAccount}\n` +
     `2. Gunakan ID Pembayaran sebagai berita acara transfer\n` +
     `3. Kirim bukti transfer ke email: ${paymentEmail}\n\n` +
     `Jika Anda memiliki pertanyaan, silakan hubungi tim kami di:\n` +
@@ -351,7 +364,7 @@ async function sendTenantPaymentDueSoonEmail({ to, tenantName, tenantCode, payme
                             </td>
                             <td style="padding: 0; vertical-align: top;">
                               <div style="font-size: 14px; color: #374151; line-height: 1.6;">
-                                Transfer ke rekening perusahaan: <strong>${bankAccount}</strong> a.n ${bankAccountName}
+                                Transfer ke rekening perusahaan: <strong>${bankAccount}</strong>
                               </div>
                             </td>
                           </tr>

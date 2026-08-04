@@ -9,6 +9,23 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
 
   router.use(authMiddleware, ensureRole);
 
+  // Role tenant hanya boleh membaca data tenant. Satu gerbang untuk seluruh
+  // endpoint di router ini, termasuk sub-resource payments/legals/deposito-logs.
+  // Usecase juga memasang guard yang sama sebagai lapis kedua.
+  router.use((req, res, next) => {
+    const isReadOnlyRole = String(req.auth?.roleName || '').toLowerCase() === 'tenant';
+    if (isReadOnlyRole && req.method !== 'GET' && req.method !== 'HEAD') {
+      req.log?.warn(
+        { user_id: req.auth?.userId, method: req.method, path: req.originalUrl },
+        'TenantRouter.write_denied_for_tenant_role'
+      );
+      return res
+        .status(403)
+        .json(createResponse(null, 'Forbidden: role tenant hanya dapat melihat data', 403, false));
+    }
+    return next();
+  });
+
   router.post(
     '/', 
     [
@@ -89,7 +106,7 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
 
       const tenant = await TenantUseCase.createTenant({
         name, tenant_identifications, contract_documents, contract_begin_at, contract_end_at, unit_ids, asset_ids, building_type, payment_term, rent_price, ppn, building_area, land_area, electricity_power, user_id, new_user, category, sub_category, bank_id, status, createdBy: req.auth.userId
-      }, {userId: req.auth.userId, log: req.log});
+      }, {userId: req.auth.userId, roleName: req.auth.roleName, log: req.log});
       res.status(201).json(createResponse(tenant, "success", 201));
     } catch (err) {
       const msg = errorMessage(err, 'Gagal membuat tenant');
@@ -114,7 +131,7 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
     req.query.offset = offset
     try {
       req.log?.info(req.query, "TenantRouter.getTenants");
-      const data = await TenantUseCase.getAllTenants(req.query, {log: req.log, userId: req.auth.userId});
+      const data = await TenantUseCase.getAllTenants(req.query, {log: req.log, userId: req.auth.userId, roleName: req.auth.roleName});
       
       res.status(200).json(createResponse(data.tenants, "success", 200, true, {
         total: data.total,
@@ -130,7 +147,7 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
   router.get('/:id', async (req, res) => {
     try {
       req.log?.info({tenant_id: req.params.id}, "TenantRouter.getTenant");
-      const tenant = await TenantUseCase.getTenantById(req.params.id, {log: req.log, userId: req.auth.userId});
+      const tenant = await TenantUseCase.getTenantById(req.params.id, {log: req.log, userId: req.auth.userId, roleName: req.auth.roleName});
       if (!tenant) {
         return res.status(404).json(createResponse(null, "not found", 404));
       }
@@ -149,18 +166,19 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
 
     try {
       req.log?.info({ tenant_id: req.params.id, update_data: req.body }, "TenantRouter.updateTenant");
-      const updated = await TenantUseCase.updateTenant(req.params.id, req.body, {log: req.log, userId: req.auth.userId});
+      const updated = await TenantUseCase.updateTenant(req.params.id, req.body, {log: req.log, userId: req.auth.userId, roleName: req.auth.roleName});
       res.status(202).json(createResponse(updated, "success", 202));
     } catch (err) {
+      const isTenantNotFound = err.message === 'Tenant not found';
+      const status = err.statusCode === 400 ? 400 : (isTenantNotFound ? 404 : 500);
       const msg = errorMessage(
         err,
-        err.statusCode === 400 ? 'Gagal memperbarui tenant' : 'internal server error'
+        status === 400 ? 'Gagal memperbarui tenant' : (status === 404 ? 'Tenant not found' : 'internal server error')
       );
       req.log?.error(
         { tenant_id: req.params.id, update_data: req.body, err: msg },
         'TenantRouter.updateTenant_error'
       );
-      const status = err.statusCode === 400 ? 400 : 500;
       res.status(status).json(createResponse(null, msg, status, false, {}, { message: msg }));
     }
   });
@@ -175,7 +193,7 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
     
     try {
       req.log?.info({ tenant_id: req.params.id }, "TenantRouter.deleteTenant");
-      await TenantUseCase.deleteTenant(req.params.id, {log: req.log, userId: req.auth.userId});
+      await TenantUseCase.deleteTenant(req.params.id, {log: req.log, userId: req.auth.userId, roleName: req.auth.roleName});
       res.status(204).send();
     } catch (err) {
       req.log?.error({ tenant_id: req.params.id }, `TenantRouter.deleteTenant_error: ${err.message}`);
@@ -192,7 +210,8 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
       req.log?.info({ tenant_id: req.params.id }, "TenantRouter.getTenantLogs");
       const tenantLogs = await TenantUseCase.getTenantLogs(req.params.id, {
         userId: req.auth.userId,
-        log: req.log
+        roleName: req.auth.roleName,
+        log: req.log,
       })
 
       res.status(200).json(createResponse(tenantLogs, "success", 200, true, {
@@ -202,6 +221,9 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
       }));
     } catch (err) {
       req.log?.error({ tenant_id: req.params.id }, `TenantRouter.getTenantLogs_error: ${err.message}`);
+      if (err.message === 'Tenant not found') {
+        return res.status(404).json(createResponse(null, "Tenant not found", 404));
+      }
       res.status(500).json(createResponse(null, "internal server error", 500))
     }
   });
@@ -227,6 +249,7 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
         order: req.query.order || 'DESC',
       }, {
         userId: req.auth.userId,
+        roleName: req.auth.roleName,
         log: req.log,
       });
 
@@ -274,6 +297,7 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
         notes: req.body.notes,
       }, {
         userId: req.auth.userId,
+        roleName: req.auth.roleName,
         log: req.log,
       });
 
@@ -325,6 +349,7 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
         req.body,
         {
           userId: req.auth.userId,
+          roleName: req.auth.roleName,
           log: req.log,
         }
       );
@@ -363,6 +388,7 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
 
       await DepositoLogUsecase.deleteDepositoLog(req.params.logId, req.params.id, {
         userId: req.auth.userId,
+        roleName: req.auth.roleName,
         log: req.log,
       });
 
@@ -461,7 +487,8 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
         pph: req.body.pph,
       }, {
         userId: req.auth.userId,
-        log: req.log
+        roleName: req.auth.roleName,
+        log: req.log,
       });
 
       res.status(201).json(createResponse(paymentLog, "Payment log created successfully", 201));
@@ -494,7 +521,8 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
         status: req.query.status, // Filter by status (unpaid, paid, expired, or 0, 1, 2)
       }, {
         userId: req.auth.userId,
-        log: req.log
+        roleName: req.auth.roleName,
+        log: req.log,
       });
 
       res.status(200).json(createResponse(result.rows, "success", 200, true, {
@@ -583,7 +611,8 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
         },
         {
           userId: req.auth.userId,
-          log: req.log
+          roleName: req.auth.roleName,
+          log: req.log,
         }
       );
 
@@ -622,7 +651,8 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
         req.params.id,
         {
           userId: req.auth.userId,
-          log: req.log
+          roleName: req.auth.roleName,
+          log: req.log,
         }
       );
 
@@ -666,7 +696,8 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
         status: req.body.status || 'belum_selesai',
       }, {
         userId: req.auth.userId,
-        log: req.log
+        roleName: req.auth.roleName,
+        log: req.log,
       });
 
       res.status(201).json(createResponse(tenantLegal, "Tenant legal created successfully", 201));
@@ -697,7 +728,8 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
       req.log?.info({ tenant_id: req.params.id }, "TenantRouter.getTenantLegals");
       const result = await TenantLegalUsecase.getTenantLegalsByTenantId(req.params.id, {
         userId: req.auth.userId,
-        log: req.log
+        roleName: req.auth.roleName,
+        log: req.log,
       });
 
       res.status(200).json(createResponse(result, "success", 200));
@@ -737,7 +769,8 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
         req.body,
         {
           userId: req.auth.userId,
-          log: req.log
+          roleName: req.auth.roleName,
+          log: req.log,
         }
       );
 
@@ -775,7 +808,8 @@ function InitTenantRouter(TenantUseCase, TenantPaymentLogUsecase, TenantLegalUse
         req.params.legalId,
         {
           userId: req.auth.userId,
-          log: req.log
+          roleName: req.auth.roleName,
+          log: req.log,
         }
       );
 

@@ -10,6 +10,12 @@ const {
 } = require("../models/Tenant");
 const { AttachmentType } = require("../models/TenantAttachment");
 const { transformImageUrls } = require('../services/baseUrl');
+const {
+  isTenantScopedRole,
+  canAccessTenant,
+  ensureTenantAccessible,
+  assertCanWriteTenantData,
+} = require('../utils/tenantAccess');
 
 class TenantUseCase {
   constructor(
@@ -45,6 +51,8 @@ class TenantUseCase {
   }
 
   async createTenant(data, ctx) {
+    // Di luar try: catch di bawah membungkus error sehingga statusCode hilang
+    assertCanWriteTenantData(ctx);
     try {
       ctx.log?.info(data, "TenantUsecase.createTenant");
       const result = await sequelize.transaction(async (t) => {
@@ -936,6 +944,14 @@ class TenantUseCase {
       ctx.log?.info({ tenant_id: id }, "TenantUsecase.getTenantById");
       const tenant = await this.tenantRepository.findById(id, ctx);
 
+      if (tenant && !canAccessTenant(tenant, ctx)) {
+        ctx.log?.warn(
+          { tenant_id: id, user_id: ctx.userId },
+          "TenantUsecase.getTenantById_forbidden"
+        );
+        return null;
+      }
+
       if (tenant) {
         await this.attachTenantResources(tenant, ctx);
 
@@ -984,7 +1000,14 @@ class TenantUseCase {
   async getAllTenants(filter = {}, ctx) {
     try {
       ctx.log?.info(filter, "TenantUsecase.getAllTenants");
-      const data = await this.tenantRepository.findAll(filter, ctx);
+
+      // Paksa scoping di server: role tenant tidak boleh melihat tenant user lain,
+      // termasuk bila client mengirim user_id milik orang lain.
+      const effectiveFilter = isTenantScopedRole(ctx)
+        ? { ...filter, user_id: ctx.userId }
+        : filter;
+
+      const data = await this.tenantRepository.findAll(effectiveFilter, ctx);
 
       // Process each tenant to include attachments, units, and categories
       const processedTenants = await Promise.all(
@@ -1044,12 +1067,13 @@ class TenantUseCase {
   async updateTenant(id, data, ctx) {
     try {
       ctx.log?.info({ tenant_id: id, update_data: data }, "TenantUsecase.updateTenant");
+      assertCanWriteTenantData(ctx);
 
       const result = await sequelize.transaction(async (t) => {
         const txCtx = { ...ctx, transaction: t };
 
         const oldTenant = await this.tenantRepository.findById(id, txCtx);
-        if (!oldTenant) {
+        if (!oldTenant || !canAccessTenant(oldTenant, ctx)) {
           throw new Error('Tenant not found');
         }
 
@@ -1259,10 +1283,11 @@ class TenantUseCase {
     const transaction = await sequelize.transaction();
     try {
       ctx.log?.info({ tenant_id: id }, "TenantUsecase.deleteTenant");
-      
+      assertCanWriteTenantData(ctx);
+
       // Get tenant data before delete
       const tenant = await this.tenantRepository.findById(id, ctx);
-      if (!tenant) {
+      if (!tenant || !canAccessTenant(tenant, ctx)) {
         throw new Error('Tenant not found');
       }
 
@@ -1307,6 +1332,7 @@ class TenantUseCase {
 
   async getTenantLogs(id, ctx) {
     ctx.log?.info({ tenant_id: id }, "TenantUsecase.getTenantLogs");
+    await ensureTenantAccessible(this.tenantRepository, id, ctx);
     let tenantLogs = await this.tenantLogRepository.findByTenantID(id, ctx);
     return tenantLogs;
   }

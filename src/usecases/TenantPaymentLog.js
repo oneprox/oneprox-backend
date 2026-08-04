@@ -2,6 +2,10 @@ const sequelize = require("../models/sequelize");
 const { PaymentLogStatusIntToStr } = require("../models/TenantPaymentLog");
 const { updateTenantPaymentStatus } = require("../routes/internal");
 const { normalizePaymentBillingFields } = require("../utils/paymentBilling");
+const {
+  ensureTenantAccessible,
+  assertCanWriteTenantData,
+} = require("../utils/tenantAccess");
 
 class TenantPaymentLogUsecase {
   constructor(tenantPaymentLogRepository, tenantRepository) {
@@ -12,12 +16,14 @@ class TenantPaymentLogUsecase {
   async createPaymentLog(data, ctx) {
     try {
       ctx.log?.info(data, "TenantPaymentLogUsecase.createPaymentLog");
+      assertCanWriteTenantData(ctx);
       
-      // Verify tenant exists
-      const tenant = await this.tenantRepository.findById(data.tenant_id, ctx);
-      if (!tenant) {
-        throw new Error('Tenant not found');
-      }
+      // Verify tenant exists dan boleh diakses oleh pemanggil
+      const tenant = await ensureTenantAccessible(
+        this.tenantRepository,
+        data.tenant_id,
+        ctx
+      );
 
       // Create payment log
       // billing_period, billing_amount, and payment_deadline are mandatory
@@ -82,12 +88,19 @@ class TenantPaymentLogUsecase {
   async updatePaymentLog(id, data, ctx) {
     try {
       ctx.log?.info({ id, data }, "TenantPaymentLogUsecase.updatePaymentLog");
+      assertCanWriteTenantData(ctx);
       
       // Verify payment log exists
       const paymentLog = await this.tenantPaymentLogRepository.findById(id, ctx);
       if (!paymentLog) {
         throw new Error('Payment log not found');
       }
+      await ensureTenantAccessible(
+        this.tenantRepository,
+        paymentLog.tenant_id,
+        ctx,
+        'Payment log not found'
+      );
 
       // Convert status from string to integer if provided
       const updateData = { ...data };
@@ -205,11 +218,8 @@ class TenantPaymentLogUsecase {
     try {
       ctx.log?.info({ tenantId, queryParams }, "TenantPaymentLogUsecase.getPaymentLogsByTenantId");
       
-      // Verify tenant exists
-      const tenant = await this.tenantRepository.findById(tenantId, ctx);
-      if (!tenant) {
-        throw new Error('Tenant not found');
-      }
+      // Verify tenant exists dan boleh diakses oleh pemanggil
+      await ensureTenantAccessible(this.tenantRepository, tenantId, ctx);
 
       const result = await this.tenantPaymentLogRepository.findByTenantId(tenantId, queryParams, ctx);
       return result;
@@ -239,6 +249,7 @@ class TenantPaymentLogUsecase {
   async deletePaymentLog(id, tenantId, ctx) {
     try {
       ctx.log?.info({ id, tenantId }, "TenantPaymentLogUsecase.deletePaymentLog");
+      assertCanWriteTenantData(ctx);
       
       // Verify payment log exists
       const paymentLog = await this.tenantPaymentLogRepository.findById(id, ctx);
@@ -248,6 +259,12 @@ class TenantPaymentLogUsecase {
       if (tenantId && paymentLog.tenant_id !== tenantId) {
         throw new Error('Payment log not found');
       }
+      await ensureTenantAccessible(
+        this.tenantRepository,
+        paymentLog.tenant_id,
+        ctx,
+        'Payment log not found'
+      );
 
       await this.tenantPaymentLogRepository.delete(id, ctx);
       return true;

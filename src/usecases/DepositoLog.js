@@ -1,3 +1,8 @@
+const {
+  ensureTenantAccessible,
+  assertCanWriteTenantData,
+} = require("../utils/tenantAccess");
+
 class DepositoLogUsecase {
   constructor(depositoLogRepository, tenantRepository) {
     this.depositoLogRepository = depositoLogRepository;
@@ -27,11 +32,9 @@ class DepositoLogUsecase {
   async createDepositoLog(data, ctx) {
     try {
       ctx.log?.info(data, 'DepositoLogUsecase.createDepositoLog');
+      assertCanWriteTenantData(ctx);
 
-      const tenant = await this.tenantRepository.findById(data.tenant_id, ctx);
-      if (!tenant) {
-        throw new Error('Tenant not found');
-      }
+      await ensureTenantAccessible(this.tenantRepository, data.tenant_id, ctx);
 
       const depositoLog = await this.depositoLogRepository.create({
         tenant_id: data.tenant_id,
@@ -53,6 +56,7 @@ class DepositoLogUsecase {
     try {
       const logId = this._normalizeLogId(id);
       ctx.log?.info({ id: logId, tenantId, data }, 'DepositoLogUsecase.updateDepositoLog');
+      assertCanWriteTenantData(ctx);
 
       const depositoLog = await this.depositoLogRepository.findById(logId, ctx);
       if (
@@ -61,6 +65,12 @@ class DepositoLogUsecase {
       ) {
         throw new Error('Deposit log not found');
       }
+      await ensureTenantAccessible(
+        this.tenantRepository,
+        depositoLog.tenant_id,
+        ctx,
+        'Deposit log not found'
+      );
 
       const updateData = {};
       if (data.deposit_date !== undefined) {
@@ -85,10 +95,7 @@ class DepositoLogUsecase {
     try {
       ctx.log?.info({ tenantId, queryParams }, 'DepositoLogUsecase.getDepositoLogsByTenantId');
 
-      const tenant = await this.tenantRepository.findById(tenantId, ctx);
-      if (!tenant) {
-        throw new Error('Tenant not found');
-      }
+      await ensureTenantAccessible(this.tenantRepository, tenantId, ctx);
 
       return this.depositoLogRepository.findByTenantId(tenantId, queryParams, ctx);
     } catch (error) {
@@ -101,6 +108,7 @@ class DepositoLogUsecase {
     try {
       const logId = this._normalizeLogId(id);
       ctx.log?.info({ id: logId, tenantId }, 'DepositoLogUsecase.deleteDepositoLog');
+      assertCanWriteTenantData(ctx);
 
       const depositoLog = await this.depositoLogRepository.findById(logId, ctx);
       if (!depositoLog) {
@@ -110,6 +118,12 @@ class DepositoLogUsecase {
       if (this._normalizeUuid(depositoLog.tenant_id) !== this._normalizeUuid(tenantId)) {
         throw new Error('Deposit log not found');
       }
+      await ensureTenantAccessible(
+        this.tenantRepository,
+        depositoLog.tenant_id,
+        ctx,
+        'Deposit log not found'
+      );
 
       await this.depositoLogRepository.delete(logId, ctx);
       return true;

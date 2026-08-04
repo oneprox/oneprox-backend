@@ -1,3 +1,8 @@
+const {
+  ensureTenantAccessible,
+  assertCanWriteTenantData,
+} = require("../utils/tenantAccess");
+
 class TenantLegalUsecase {
   constructor(tenantLegalRepository, tenantRepository, settingsRepository) {
     this.tenantLegalRepository = tenantLegalRepository;
@@ -8,12 +13,10 @@ class TenantLegalUsecase {
   async createTenantLegal(data, ctx) {
     try {
       ctx.log?.info(data, "TenantLegalUsecase.createTenantLegal");
+      assertCanWriteTenantData(ctx);
       
-      // Verify tenant exists
-      const tenant = await this.tenantRepository.findById(data.tenant_id, ctx);
-      if (!tenant) {
-        throw new Error('Tenant not found');
-      }
+      // Verify tenant exists dan boleh diakses oleh pemanggil
+      await ensureTenantAccessible(this.tenantRepository, data.tenant_id, ctx);
 
       // Create tenant legal
       const tenantLegal = await this.tenantLegalRepository.create({
@@ -39,12 +42,19 @@ class TenantLegalUsecase {
   async updateTenantLegal(id, data, ctx) {
     try {
       ctx.log?.info({ id, data }, "TenantLegalUsecase.updateTenantLegal");
+      assertCanWriteTenantData(ctx);
       
       // Verify tenant legal exists
       const tenantLegal = await this.tenantLegalRepository.findById(id, ctx);
       if (!tenantLegal) {
         throw new Error('Tenant legal not found');
       }
+      await ensureTenantAccessible(
+        this.tenantRepository,
+        tenantLegal.tenant_id,
+        ctx,
+        'Tenant legal not found'
+      );
 
       // Update tenant legal
       const updatedTenantLegal = await this.tenantLegalRepository.update(id, {
@@ -66,11 +76,8 @@ class TenantLegalUsecase {
     try {
       ctx.log?.info({ tenantId }, "TenantLegalUsecase.getTenantLegalsByTenantId");
       
-      // Verify tenant exists
-      const tenant = await this.tenantRepository.findById(tenantId, ctx);
-      if (!tenant) {
-        throw new Error('Tenant not found');
-      }
+      // Verify tenant exists dan boleh diakses oleh pemanggil
+      await ensureTenantAccessible(this.tenantRepository, tenantId, ctx);
 
       const result = await this.tenantLegalRepository.findByTenantId(tenantId, ctx);
       
@@ -118,12 +125,19 @@ class TenantLegalUsecase {
   async deleteTenantLegal(id, ctx) {
     try {
       ctx.log?.info({ id }, "TenantLegalUsecase.deleteTenantLegal");
+      assertCanWriteTenantData(ctx);
       
       // Verify tenant legal exists
       const tenantLegal = await this.tenantLegalRepository.findById(id, ctx);
       if (!tenantLegal) {
         throw new Error('Tenant legal not found');
       }
+      await ensureTenantAccessible(
+        this.tenantRepository,
+        tenantLegal.tenant_id,
+        ctx,
+        'Tenant legal not found'
+      );
 
       await this.tenantLegalRepository.delete(id, ctx);
       return true;

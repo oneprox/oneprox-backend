@@ -6,3 +6,10 @@ node_modules/
 custom-coverage-reports
 coverage
 public
+*.log
+
+# tests (kept local, not committed)
+*.test.js
+*.spec.js
+tests/
+__tests__/

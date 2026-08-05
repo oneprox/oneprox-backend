@@ -508,6 +508,7 @@ class UserTaskRepository {
         all_users = null,
         asset_id = null,
         non_routine = null,
+        scope = 'both',
       } = queryParams;
 
       const Role = require('../models/Role');
@@ -531,6 +532,13 @@ class UserTaskRepository {
         non_routine === 1 ||
         non_routine === '1' ||
         non_routine === 'true';
+      // `scope` membatasi rentang mana yang benar-benar di-query. Dashboard
+      // memanggil day dan month sebagai dua request paralel supaya kartu harian
+      // tidak menunggu pemindaian sebulan penuh. Default `both` menjaga
+      // kompatibilitas pemanggil lama.
+      const scopeKey = String(scope || 'both').toLowerCase();
+      const wantsDay = scopeKey !== 'month';
+      const wantsMonth = scopeKey !== 'day';
 
       const parseRange = (fromKey, toKey) => {
         const from = moment.tz(fromKey, 'YYYY-MM-DD', timezone).startOf('day');
@@ -636,7 +644,7 @@ class UserTaskRepository {
         const taskIncludeWhere = {};
         if (asset_id) taskIncludeWhere.asset_id = asset_id;
 
-        const { rows } = await this.userTaskModel.findAndCountAll({
+        const rows = await this.userTaskModel.findAll({
           where: whereClause,
           limit: parseInt(limit, 10),
           offset: parseInt(offset, 10),
@@ -660,8 +668,10 @@ class UserTaskRepository {
         return mapRowsToMainWithChildren(rows);
       };
 
-      const todayRows = await fetchByActivityRange(dayKey, dayKey);
-      const monthRows = await fetchByActivityRange(monthFromKey, monthToKey);
+      const [todayRows, monthRows] = await Promise.all([
+        wantsDay ? fetchByActivityRange(dayKey, dayKey) : Promise.resolve([]),
+        wantsMonth ? fetchByActivityRange(monthFromKey, monthToKey) : Promise.resolve([]),
+      ]);
 
       return {
         day_date: dayKey,

@@ -6,6 +6,9 @@ const {
 const { TenantStatusStrToInt } = require('../models/Tenant');
 const { nonRoutineDueEndMoment, parseNonRoutineNotes } = require('../utils/nonRoutineDue');
 
+/** Invoice masuk Reminder Needed mulai H-7, berlaku sama untuk semua termin pembayaran. */
+const REMINDER_NEEDED_DAYS = 7;
+
 const FINANCIAL_PAYMENT_STATUS_ORDER = {
   overdue: 0,
   reminder_needed: 1,
@@ -28,9 +31,13 @@ function isTenantHiddenFromFinancial(status) {
   return TENANT_STATUS_HIDDEN_FROM_FINANCIAL.includes(statusInt);
 }
 
-/** Sisa tagihan satu invoice: nilai invoice dikurangi yang sudah dibayar, minimal 0. */
-function invoiceOutstanding(paymentData, isPaid) {
-  if (isPaid) return 0;
+/**
+ * Sisa tagihan satu invoice: nilai invoice dikurangi yang sudah dibayar, minimal 0.
+ * Hanya invoice yang sudah lewat jatuh tempo yang terhitung tunggakan; invoice yang
+ * belum jatuh tempo (scheduled/reminder_needed) dan yang sudah lunas menyumbang 0.
+ */
+function invoiceOutstanding(paymentData, status) {
+  if (status !== 'overdue') return 0;
   const invoiceValue =
     parseFloat(paymentData.amount) || parseFloat(paymentData.billing_amount) || 0;
   const paid = parseFloat(paymentData.paid_amount) || 0;
@@ -45,9 +52,10 @@ function daysLeftFromDeadline(deadline, now = new Date()) {
 }
 
 /**
+ * Ambang Reminder Needed: H-7 untuk semua termin pembayaran.
  * @returns {'paid' | 'scheduled' | 'reminder_needed' | 'overdue'}
  */
-function calculatePaymentStatus(deadline, now = new Date(), paymentTerm = 1) {
+function calculatePaymentStatus(deadline, now = new Date()) {
   if (!deadline) return 'scheduled';
 
   const dl = deadline ? new Date(deadline) : null;
@@ -57,12 +65,7 @@ function calculatePaymentStatus(deadline, now = new Date(), paymentTerm = 1) {
   if (left === null) return 'scheduled';
 
   if (left < 0) return 'overdue';
-
-  let reminderDays = 7;
-  if (paymentTerm === 0) reminderDays = 90;
-  else if (paymentTerm === 1) reminderDays = 7;
-
-  if (left <= reminderDays) return 'reminder_needed';
+  if (left <= REMINDER_NEEDED_DAYS) return 'reminder_needed';
 
   return 'scheduled';
 }
@@ -1366,14 +1369,7 @@ class DashboardUsecase {
             const deadline = paymentData.payment_deadline ? new Date(paymentData.payment_deadline) : null;
             if (!deadline || Number.isNaN(deadline.getTime())) return;
 
-            const paymentTerm =
-              tenantData.payment_term !== undefined && tenantData.payment_term !== null
-                ? tenantData.payment_term
-                : 1;
-
-            const status = isPaid
-              ? 'paid'
-              : calculatePaymentStatus(deadline, now, paymentTerm);
+            const status = isPaid ? 'paid' : calculatePaymentStatus(deadline, now);
 
             const daysPastDue = Math.floor(
               (now.getTime() - deadline.getTime()) / (1000 * 60 * 60 * 24)
@@ -1433,7 +1429,7 @@ class DashboardUsecase {
                   : '-',
               nilaiInvoice: parseFloat(paymentData.amount) || parseFloat(paymentData.billing_amount) || 0,
               // Sisa tagihan invoice ini; dijumlahkan per tenant menjadi "Nilai Tunggakan"
-              outstandingAmount: invoiceOutstanding(paymentData, isPaid),
+              outstandingAmount: invoiceOutstanding(paymentData, status),
               tanggalInvoice: tanggalInvoiceStr,
               status: status,
               aging: aging > 0 ? aging : 0,

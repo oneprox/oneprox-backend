@@ -49,43 +49,34 @@ async function loadPaymentReminderMailConfig(settingsRepository, bankRepository,
   };
 }
 
+/** Invoice masuk Reminder Needed mulai H-7, berlaku sama untuk semua termin pembayaran. */
+const REMINDER_NEEDED_DAYS = 7;
+
 /**
- * Calculate payment status based on payment deadline and payment term
+ * Calculate payment status based on payment deadline
  * @param {Date|string|null} deadline - Payment deadline date
  * @param {Date} now - Current date (default: new Date())
- * @param {number} paymentTerm - Payment term: 0=year, 1=month
  * @returns {'paid' | 'scheduled' | 'reminder_needed' | 'overdue'}
  */
-function calculatePaymentStatus(deadline, now = new Date(), paymentTerm = 1) {
+function calculatePaymentStatus(deadline, now = new Date()) {
   if (!deadline) return 'scheduled';
-  
+
   const dl = deadline ? new Date(deadline) : null;
   if (!dl || Number.isNaN(dl.getTime())) return 'scheduled';
-  
+
   const left = daysLeftFromDeadline(dl, now);
   if (left === null) return 'scheduled';
-  
-  // If deadline has passed, status is overdue
+
+  // Sudah lewat jatuh tempo
   if (left < 0) {
     return 'overdue';
   }
-  
-  // Determine reminder days based on payment term
-  // payment_term: 0 = year, 1 = month
-  let reminderDays = 7; // Default for monthly
-  if (paymentTerm === 0) {
-    // For yearly payment: H-3 bulan (90 days) sampai H
-    reminderDays = 90;
-  } else if (paymentTerm === 1) {
-    // For monthly payment: H-7 sampai H
-    reminderDays = 7;
-  }
-  
-  // If within reminder period (H-reminderDays sampai H)
-  if (left <= reminderDays) {
+
+  // H-7 sampai H, berlaku sama untuk semua termin pembayaran
+  if (left <= REMINDER_NEEDED_DAYS) {
     return 'reminder_needed';
   }
-  
+
   return 'scheduled';
 }
 
@@ -102,21 +93,15 @@ async function updateTenantPaymentStatus({ tenantRepository, tenantPaymentLogRep
   try {
     ctx.log?.info({ tenantId }, 'updateTenantPaymentStatus: Starting');
     
-    // Get current tenant to see payment_term
     const currentTenant = await tenantRepository.findById(tenantId, ctx);
     if (!currentTenant) {
       ctx.log?.warn({ tenantId }, 'updateTenantPaymentStatus: Tenant not found');
       return 'scheduled';
     }
-    
-    const paymentTerm = currentTenant.payment_term !== undefined && currentTenant.payment_term !== null 
-      ? currentTenant.payment_term 
-      : 1; // Default to monthly (1) if not set
-    
+
     ctx.log?.info({ 
       tenantId, 
       currentPaymentStatus: currentTenant?.payment_status,
-      paymentTerm 
     }, 'updateTenantPaymentStatus: Current tenant status');
     
     // Get all payment logs for this tenant (unpaid and paid)
@@ -132,7 +117,6 @@ async function updateTenantPaymentStatus({ tenantRepository, tenantPaymentLogRep
     ctx.log?.info({ 
       tenantId, 
       totalLogs: paymentLogs.length,
-      paymentTerm
     }, 'updateTenantPaymentStatus: Payment logs summary');
     
     // Find the nearest deadline from all payment logs (paid and unpaid)
@@ -174,7 +158,6 @@ async function updateTenantPaymentStatus({ tenantRepository, tenantPaymentLogRep
       nearestDeadline: nearestDeadline.toISOString(),
       isPaid,
       daysSinceDeadline,
-      paymentTerm
     }, 'updateTenantPaymentStatus: Nearest deadline info');
     
     // If the nearest deadline payment is paid
@@ -203,13 +186,12 @@ async function updateTenantPaymentStatus({ tenantRepository, tenantPaymentLogRep
       }
     }
     
-    // If the nearest deadline payment is unpaid, calculate status based on deadline and payment_term
-    const status = calculatePaymentStatus(nearestDeadline, now, paymentTerm);
+    // If the nearest deadline payment is unpaid, calculate status based on deadline
+    const status = calculatePaymentStatus(nearestDeadline, now);
     await tenantRepository.update(tenantId, { payment_status: status });
     ctx.log?.info({ 
       tenantId, 
       status, 
-      paymentTerm,
       nearestDeadline: nearestDeadline.toISOString(),
       daysLeft: daysSinceDeadline,
       reason: 'Nearest deadline payment is unpaid, calculating status based on deadline'
@@ -261,33 +243,14 @@ function InitInternalRouter({
         // Use a large window (365 days) to get all unpaid logs, then filter by payment_term
         const allUnpaidLogs = await tenantPaymentLogRepository.findUnpaidDueSoon({ days: 365, now }, { log: req.log });
         
-        // Filter logs based on payment_term reminder window
+        // Filter logs: reminder dikirim mulai H-7, sama untuk semua termin pembayaran
         const paymentLogs = [];
         for (const pl of allUnpaidLogs) {
-          const tenant = pl.tenant || null;
-          const paymentTerm = tenant?.payment_term !== undefined && tenant?.payment_term !== null 
-            ? tenant.payment_term 
-            : 1; // Default to monthly
-          
           const dl = pl.payment_deadline ? new Date(pl.payment_deadline) : null;
           if (!dl || Number.isNaN(dl.getTime())) continue;
-          
-          // Calculate days until deadline
+
           const daysUntilDeadline = Math.ceil((dl.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
-          
-          // Check if reminder should be sent based on payment_term
-          let shouldRemind = false;
-          if (paymentTerm === 0) {
-            // Yearly: send reminder if deadline is within 3 months (90 days) or less
-            // We want to send it when we're at or past the 3-month mark before deadline
-            const threeMonthsInDays = 90;
-            shouldRemind = daysUntilDeadline <= threeMonthsInDays && daysUntilDeadline >= 0;
-          } else {
-            // Monthly: send reminder if deadline is within 7 days or less
-            shouldRemind = daysUntilDeadline <= 7 && daysUntilDeadline >= 0;
-          }
-          
-          if (shouldRemind) {
+          if (daysUntilDeadline >= 0 && daysUntilDeadline <= REMINDER_NEEDED_DAYS) {
             paymentLogs.push(pl);
           }
         }
@@ -308,15 +271,9 @@ function InitInternalRouter({
           const dl = pl.payment_deadline || null;
           const left = daysLeftFromDeadline(dl, now);
           
-          // Get payment_term from tenant (0=year, 1=month)
-          const paymentTerm = tenant?.payment_term !== undefined && tenant?.payment_term !== null 
-            ? tenant.payment_term 
-            : 1; // Default to monthly
-          
-          // Determine payment status for this tenant based on deadline and payment_term
           let paymentStatus = 'scheduled';
           if (left !== null) {
-            paymentStatus = calculatePaymentStatus(dl, now, paymentTerm);
+            paymentStatus = calculatePaymentStatus(dl, now);
           }
           
           // Track the most critical status for each tenant

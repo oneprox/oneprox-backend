@@ -29,7 +29,27 @@ function nonRoutineDueEndMoment(notes, tz = 'Asia/Jakarta') {
   return moment.tz({ year: y, month: m - 1, day }, tz).endOf('day');
 }
 
+/**
+ * Awal hari kalender jatuh tempo (Asia/Jakarta) dari notes JSON non-rutin.
+ */
+function nonRoutineDueStartMoment(notes, tz = 'Asia/Jakarta') {
+  const end = nonRoutineDueEndMoment(notes, tz);
+  return end ? end.clone().startOf('day') : null;
+}
+
+/**
+ * Slot non-rutin baru boleh tampil di daftar petugas mulai hari jatuh temponya.
+ * Slot tanpa informasi jatuh tempo tetap ditampilkan agar tidak ada data yang hilang diam-diam.
+ */
+function isNonRoutineSlotVisible(notes, now = new Date(), tz = 'Asia/Jakarta') {
+  const dueStart = nonRoutineDueStartMoment(notes, tz);
+  if (!dueStart) return true;
+  return moment.tz(now, tz).valueOf() >= dueStart.valueOf();
+}
+
 module.exports = {
   parseNonRoutineNotes,
   nonRoutineDueEndMoment,
+  nonRoutineDueStartMoment,
+  isNonRoutineSlotVisible,
 };

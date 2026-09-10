@@ -3,6 +3,7 @@ const { Op } = require('sequelize');
 const {
   ComplaintReportStatusIntToStr,
 } = require('../models/ComplaintReport');
+const { TenantStatusStrToInt } = require('../models/Tenant');
 const { nonRoutineDueEndMoment, parseNonRoutineNotes } = require('../utils/nonRoutineDue');
 
 const FINANCIAL_PAYMENT_STATUS_ORDER = {
@@ -11,6 +12,30 @@ const FINANCIAL_PAYMENT_STATUS_ORDER = {
   scheduled: 2,
   paid: 3,
 };
+
+/**
+ * Status tenant yang sudah melepas unit (lihat TenantUsecase.isTenantStatusHoldingUnits):
+ * inactive(0), terminated(4), blacklisted(5). Tenant seperti ini tidak lagi menempati unit,
+ * jadi tidak boleh ikut tampil di card Financial.
+ */
+const TENANT_STATUS_HIDDEN_FROM_FINANCIAL = [0, 4, 5];
+
+function isTenantHiddenFromFinancial(status) {
+  if (status === null || status === undefined) return false;
+  const statusInt =
+    typeof status === 'string' ? TenantStatusStrToInt[status.trim().toLowerCase()] : Number(status);
+  if (statusInt === undefined || Number.isNaN(statusInt)) return false;
+  return TENANT_STATUS_HIDDEN_FROM_FINANCIAL.includes(statusInt);
+}
+
+/** Sisa tagihan satu invoice: nilai invoice dikurangi yang sudah dibayar, minimal 0. */
+function invoiceOutstanding(paymentData, isPaid) {
+  if (isPaid) return 0;
+  const invoiceValue =
+    parseFloat(paymentData.amount) || parseFloat(paymentData.billing_amount) || 0;
+  const paid = parseFloat(paymentData.paid_amount) || 0;
+  return Math.max(0, invoiceValue - paid);
+}
 
 function daysLeftFromDeadline(deadline, now = new Date()) {
   const dl = deadline ? new Date(deadline) : null;
@@ -1297,7 +1322,12 @@ class DashboardUsecase {
       for (const tenant of allTenants) {
         try {
           const tenantData = tenant.toJSON ? tenant.toJSON() : tenant;
-          
+
+          // Tenant nonaktif/terminate/blacklist sudah melepas unit → tidak muncul di card Financial
+          if (isTenantHiddenFromFinancial(tenantData.status)) {
+            continue;
+          }
+
           // Get tenant units
           const tenantUnits = await this.tenantUnitRepository.getByTenantID(tenantData.id);
           const tenantUnitIds = tenantUnits.map(tu => tu.unit_id || tu.get?.('unit_id') || tu.toJSON?.()?.unit_id);
@@ -1308,13 +1338,7 @@ class DashboardUsecase {
           
           const payments = await this.tenantPaymentLogRepository.findByTenantId(tenantData.id, { limit: 1000 }, ctx);
           const paymentArray = Array.isArray(payments) ? payments : (payments?.rows || payments?.data || []);
-          const tenantRentPrice = parseFloat(tenantData.rent_price) || 0;
-          const totalAllPayments = paymentArray.reduce((sum, payment) => {
-            const paymentData = payment.toJSON ? payment.toJSON() : payment;
-            return sum + (parseFloat(paymentData.paid_amount) || 0);
-          }, 0);
-          const remainingRentValue = Math.max(0, tenantRentPrice - totalAllPayments);
-          
+
           paymentArray.forEach((payment) => {
             const paymentData = payment.toJSON ? payment.toJSON() : payment;
             
@@ -1408,7 +1432,8 @@ class DashboardUsecase {
                   ? String(paymentData.notes).trim()
                   : '-',
               nilaiInvoice: parseFloat(paymentData.amount) || parseFloat(paymentData.billing_amount) || 0,
-              sisaNilai: remainingRentValue,
+              // Sisa tagihan invoice ini; dijumlahkan per tenant menjadi "Nilai Tunggakan"
+              outstandingAmount: invoiceOutstanding(paymentData, isPaid),
               tanggalInvoice: tanggalInvoiceStr,
               status: status,
               aging: aging > 0 ? aging : 0,

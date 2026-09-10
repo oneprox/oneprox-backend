@@ -95,6 +95,27 @@ class TenantUnitRepository {
     );
   }
 
+  /**
+   * Tenant yang masih menahan unit (status active/pending/expired) untuk sekumpulan unit.
+   * Satu query untuk semua unit agar tidak N+1 saat menampilkan daftar unit per aset.
+   * @param {string[]} unitIds
+   * @returns {Promise<{unit_id: string, tenant_status: number}[]>}
+   */
+  async findHoldingTenantsByUnitIds(unitIds) {
+    const { QueryTypes } = require('sequelize');
+    if (!Array.isArray(unitIds) || unitIds.length === 0) return [];
+    return this.tenantUnitModel.sequelize.query(
+      `
+      SELECT tu.unit_id, t.status AS tenant_status
+      FROM tenant_units tu
+      INNER JOIN tenants t ON t.id = tu.tenant_id
+      WHERE tu.unit_id IN (:unitIds)
+        AND t.status IN (1, 2, 3)
+      `,
+      { replacements: { unitIds }, type: QueryTypes.SELECT }
+    );
+  }
+
   async findActiveTenantIdByUnitId(unitId, excludeTenantId = null) {
     const { QueryTypes } = require('sequelize');
     const replacements = { unitId };

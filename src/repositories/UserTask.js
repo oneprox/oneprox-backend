@@ -1,6 +1,7 @@
 const { Op } = require("sequelize");
 const moment = require("moment-timezone");
 const { UserTaskStatusIntToStr, UserTaskStatusStrToInt } = require("../models/UserTask");
+const { isNonRoutineSlotVisible } = require("../utils/nonRoutineDue");
 
 class UserTaskRepository {
   constructor(userTaskModel, userModel, taskModel, userTaskEvidenceModel, taskScheduleModel, taskGroupModel, taskParentModel, settingsRepository = null) {
@@ -699,6 +700,7 @@ class UserTaskRepository {
         date_from = null,
         date_to = null,
         period = null,
+        include_not_yet_due = false,
       } = queryParams;
 
       let dateFilter = {};
@@ -725,10 +727,15 @@ class UserTaskRepository {
       const Role = require('../models/Role');
       const { Asset } = require('../models/Asset');
 
-      const { rows, count } = await this.userTaskModel.findAndCountAll({
+      const pageLimit = Math.min(500, Math.max(1, parseInt(limit, 10) || 50));
+      const pageOffset = Math.max(0, parseInt(offset, 10) || 0);
+
+      // Pagination diterapkan setelah filter jatuh tempo (info jatuh tempo ada di notes JSON,
+      // tidak bisa difilter di SQL), jadi query mengambil sampai batas atas halaman.
+      const { rows } = await this.userTaskModel.findAndCountAll({
         where: whereClause,
-        limit: Math.min(500, Math.max(1, parseInt(limit, 10) || 50)),
-        offset: Math.max(0, parseInt(offset, 10) || 0),
+        limit: 500,
+        offset: 0,
         order: [
           ['start_at', 'ASC'],
           ['id', 'ASC'],
@@ -784,7 +791,18 @@ class UserTaskRepository {
         return j;
       });
 
-      return { rows: list, total: count };
+      // Pekerjaan non-rutin muncul bertahap: hanya slot yang tanggal jatuh temponya sudah tiba.
+      // Slot yang sudah dikerjakan tetap ditampilkan agar riwayat petugas tidak hilang.
+      const tz = process.env.TASK_DEFAULT_TIMEZONE || 'Asia/Jakarta';
+      const now = new Date();
+      const visible = include_not_yet_due
+        ? list
+        : list.filter((t) => {
+            const alreadyWorkedOn = t.start_at != null || (t.status && t.status !== 'pending');
+            return alreadyWorkedOn || isNonRoutineSlotVisible(t.notes, now, tz);
+          });
+
+      return { rows: visible.slice(pageOffset, pageOffset + pageLimit), total: visible.length };
     } catch (error) {
       ctx.log?.error({ userId, queryParams, error }, 'UserTaskRepository.findNonRoutineByUserId_error');
       throw error;

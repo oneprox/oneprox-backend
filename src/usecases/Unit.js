@@ -1,5 +1,22 @@
 const sequelize = require("../models/sequelize");
 const { transformImageUrls } = require('../services/baseUrl');
+const { UnitStatusIntToStr } = require("../models/Unit");
+
+/**
+ * Status unit yang ditentukan oleh hunian tenant. Status fisik lain
+ * (maintenance/inactive/out_of_order) tidak ikut ditimpa saat unit memang kosong.
+ */
+const TENANT_DRIVEN_UNIT_STATUS = ['available', 'occupied', 'reserved'];
+
+/** pending(2) menahan unit sebagai reserved; active(1) & expired(3) sebagai occupied. */
+function unitStatusFromTenantStatus(tenantStatus) {
+  return Number(tenantStatus) === 2 ? 'reserved' : 'occupied';
+}
+
+function unitStatusToString(status) {
+  if (status === undefined || status === null) return status;
+  return typeof status === 'number' ? UnitStatusIntToStr[status] || status : status;
+}
 
 class UnitUsecase {
   constructor(unitRepository, unitAttachmentRepository, unitLogRepository, tenantUnitRepository) {
@@ -67,7 +84,59 @@ class UnitUsecase {
 
   async getAllUnits(filters, ctx) {
     // Business logic for retrieving all units
-    return this.unitRepository.findAll(filters, ctx);
+    const result = await this.unitRepository.findAll(filters, ctx);
+    return this.withDerivedOccupancy(result, ctx);
+  }
+
+  /**
+   * Selaraskan status hunian unit dengan tenant yang benar-benar masih menahan unit.
+   * Tenant inactive/terminated/blacklisted sudah melepas unit, sehingga unitnya kembali kosong
+   * walaupun kolom units.status pada data lama masih tercatat occupied.
+   */
+  async withDerivedOccupancy(result, ctx) {
+    const units = result?.units;
+    if (!Array.isArray(units) || units.length === 0) return result;
+    if (!this.tenantUnitRepository?.findHoldingTenantsByUnitIds) return result;
+
+    const unitIds = units.map((u) => u.id).filter(Boolean);
+    if (unitIds.length === 0) return result;
+
+    let holdings;
+    try {
+      holdings = await this.tenantUnitRepository.findHoldingTenantsByUnitIds(unitIds);
+    } catch (error) {
+      // Status tersimpan tetap dipakai kalau penurunan status gagal — jangan sampai daftar unit kosong
+      ctx?.log?.warn(
+        { error: error.message },
+        'UnitUsecase.withDerivedOccupancy_error'
+      );
+      return result;
+    }
+
+    const holdingByUnitId = new Map();
+    for (const row of holdings || []) {
+      const unitId = row.unit_id;
+      if (!unitId) continue;
+      // pending kalah dari active/expired kalau satu unit punya beberapa tautan tenant
+      const derived = unitStatusFromTenantStatus(row.tenant_status);
+      if (derived === 'occupied' || !holdingByUnitId.has(unitId)) {
+        holdingByUnitId.set(unitId, derived);
+      }
+    }
+
+    return {
+      ...result,
+      units: units.map((unit) => {
+        const storedStatus = unitStatusToString(unit.status);
+        const held = holdingByUnitId.get(unit.id);
+        if (held) {
+          return storedStatus === held ? unit : { ...unit, status: held };
+        }
+        // Tidak ada tenant yang menahan: hanya status bawaan tenant yang direset ke available
+        if (!TENANT_DRIVEN_UNIT_STATUS.includes(storedStatus)) return unit;
+        return storedStatus === 'available' ? unit : { ...unit, status: 'available' };
+      }),
+    };
   }
 
   async getUnitById(id, ctx) {

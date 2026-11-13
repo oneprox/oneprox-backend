@@ -1,5 +1,6 @@
 const { Router } = require('express');
-const { body, validationResult } = require('express-validator');
+const { body, param, validationResult } = require('express-validator');
+const { authMiddleware } = require('../middleware/auth');
 
 function InitAuthRouter(authUsecase) {
 
@@ -25,6 +26,60 @@ function InitAuthRouter(authUsecase) {
         return res.status(200).json(result.data);
       } catch (error) {
         req.log?.error(error, 'route_login_error');
+        return res.status(500).json({ message: 'Internal server error' });
+      }
+    }
+  );
+
+  // Harus didaftarkan sebelum '/impersonate/:userId'
+  router.post('/impersonate/stop', authMiddleware, async (req, res) => {
+    try {
+      const result = await authUsecase.stopImpersonation(
+        {
+          userId: req.auth.userId,
+          impersonatedBy: req.auth.impersonatedBy,
+          reason: req.body?.reason,
+          ip: req.ip,
+          userAgent: req.get('user-agent'),
+        },
+        { requestId: req.requestId, log: req.log }
+      );
+      if (!result.ok) {
+        return res.status(result.status).json({ message: result.error });
+      }
+      return res.status(200).json({ message: 'ok' });
+    } catch (error) {
+      req.log?.error(error, 'route_impersonate_stop_error');
+      return res.status(500).json({ message: 'Internal server error' });
+    }
+  });
+
+  router.post(
+    '/impersonate/:userId',
+    authMiddleware,
+    [param('userId').isString().notEmpty()],
+    async (req, res) => {
+      try {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+          return res.status(400).json({ errors: errors.array() });
+        }
+        const result = await authUsecase.impersonate(
+          {
+            actorUserId: req.auth.userId,
+            actorImpersonatedBy: req.auth.impersonatedBy,
+            targetUserId: req.params.userId,
+            ip: req.ip,
+            userAgent: req.get('user-agent'),
+          },
+          { requestId: req.requestId, log: req.log }
+        );
+        if (!result.ok) {
+          return res.status(result.status).json({ message: result.error });
+        }
+        return res.status(200).json(result.data);
+      } catch (error) {
+        req.log?.error(error, 'route_impersonate_error');
         return res.status(500).json({ message: 'Internal server error' });
       }
     }

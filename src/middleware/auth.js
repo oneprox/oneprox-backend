@@ -7,6 +7,15 @@ async function authMiddleware(req, res, next) {
     if (!token) return res.status(401).json({ message: 'Unauthorized' });
     const payload = jwt.verify(token, process.env.JWT_SECRET);
     req.auth = { userId: payload.sub, roleId: payload.roleId, roleName: payload.roleName };
+    if (payload.impersonatedBy) {
+      req.auth.impersonatedBy = payload.impersonatedBy;
+      if (req.method && req.method !== 'GET') {
+        req.log?.info(
+          { impersonatorId: payload.impersonatedBy, userId: payload.sub, method: req.method, url: req.originalUrl },
+          'impersonated_request'
+        );
+      }
+    }
     return next();
   } catch (err) {
     return res.status(401).json({ message: 'Unauthorized' });

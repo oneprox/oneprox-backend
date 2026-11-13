@@ -242,6 +242,8 @@ const authUsecase = new authUc(
   tokenRepository,
   roleRepository,
   userAssetRepository,
+  settingsRepository,
+  userLogRepository,
 );
 const userUsecase = new userUc(userRepository, userLogRepository, userAssetRepository);
 const unitUsecase = new unitUc(unitRepository, unitAttachmentRepository, unitLogRepository, tenantUnitRepository);

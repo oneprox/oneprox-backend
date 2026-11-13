@@ -7,8 +7,24 @@ class SettingsUsecase {
     this.tenantLegalRepository = tenantLegalRepository;
   }
 
+  /** Setting impersonate hanya boleh diubah oleh super_admin. */
+  assertCanModifyKey(key, ctx) {
+    const normalizedKey = String(key || '').trim();
+    if (normalizedKey.startsWith('impersonation_') && ctx?.roleName !== 'super_admin') {
+      const err = new Error('Hanya super_admin yang dapat mengubah setting ini');
+      err.status = 403;
+      throw err;
+    }
+  }
+
   validateSpecialSettingValue(key, value) {
     const normalizedKey = String(key || '').trim();
+    if (normalizedKey === 'impersonation_enabled') {
+      if (!['true', 'false'].includes(String(value).trim().toLowerCase())) {
+        throw new Error('impersonation_enabled harus bernilai true atau false');
+      }
+      return;
+    }
     const maxByKey = {
       task_generation_before_hours: 3,
       task_generation_after_hours: 6,
@@ -69,6 +85,7 @@ class SettingsUsecase {
     ctx.log?.info({ key: data.key }, 'usecase_create_setting');
     try {
       const key = String(data.key || '').trim();
+      this.assertCanModifyKey(key, ctx);
       this.validateSpecialSettingValue(key, data.value);
 
       // Check if key already exists
@@ -128,6 +145,7 @@ class SettingsUsecase {
       if (!existing) {
         throw new Error('Setting tidak ditemukan');
       }
+      this.assertCanModifyKey(existing.key, ctx);
       this.validateSpecialSettingValue(existing.key, data.value);
 
       const result = await sequelize.transaction(async (t) => {
@@ -154,6 +172,7 @@ class SettingsUsecase {
     ctx.log?.info({ key }, 'usecase_update_setting_by_key');
     try {
       const normalizedKey = String(key || '').trim();
+      this.assertCanModifyKey(normalizedKey, ctx);
       this.validateSpecialSettingValue(normalizedKey, data.value);
 
       const result = await sequelize.transaction(async (t) => {
@@ -193,6 +212,8 @@ class SettingsUsecase {
   async deleteSetting(id, ctx) {
     ctx.log?.info({ id }, 'usecase_delete_setting');
     try {
+      const existing = await this.settingsRepository.findById(id, ctx);
+      if (existing) this.assertCanModifyKey(existing.key, ctx);
       const result = await sequelize.transaction(async (t) => {
         const deleted = await this.settingsRepository.delete(id, ctx, t);
         if (!deleted) {

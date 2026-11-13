@@ -24,7 +24,8 @@ function InitSettingsRouter(settingsUsecase) {
           const setting = await settingsUsecase.getSettingByKey(req.query.key, { 
             requestId: req.requestId, 
             log: req.log,
-            userId: req.auth?.userId 
+            userId: req.auth?.userId,
+          roleName: req.auth?.roleName,
           });
           if (!setting) {
             return res.status(404).json(createResponse(null, 'Setting not found', 404));
@@ -42,7 +43,8 @@ function InitSettingsRouter(settingsUsecase) {
         const settings = await settingsUsecase.listAllSettings({ 
           requestId: req.requestId, 
           log: req.log,
-          userId: req.auth?.userId 
+          userId: req.auth?.userId,
+          roleName: req.auth?.roleName,
         });
         return res.json(createResponse(settings, 'success', 200));
       } catch (error) {
@@ -66,7 +68,8 @@ function InitSettingsRouter(settingsUsecase) {
         const setting = await settingsUsecase.getSettingById(req.params.id, { 
           requestId: req.requestId, 
           log: req.log,
-          userId: req.auth?.userId 
+          userId: req.auth?.userId,
+          roleName: req.auth?.roleName,
         });
         if (!setting) {
           return res.status(404).json(createResponse(null, 'Setting not found', 404));
@@ -98,12 +101,13 @@ function InitSettingsRouter(settingsUsecase) {
         const setting = await settingsUsecase.createSetting(req.body, { 
           requestId: req.requestId, 
           log: req.log,
-          userId: req.auth?.userId 
+          userId: req.auth?.userId,
+          roleName: req.auth?.roleName,
         });
         return res.status(201).json(createResponse(setting, 'Setting created successfully', 201));
       } catch (error) {
         req.log?.error({ error: error.message }, 'route_settings_create_error');
-        return res.status(400).json(createResponse(null, error.message || 'Failed to create setting', 400));
+        return res.status(error.status || 400).json(createResponse(null, error.message || 'Failed to create setting', 400));
       }
     }
   );
@@ -134,7 +138,8 @@ function InitSettingsRouter(settingsUsecase) {
           const setting = await settingsUsecase.updateSetting(parseInt(keyParam), req.body, { 
             requestId: req.requestId, 
             log: req.log,
-            userId: req.auth?.userId 
+            userId: req.auth?.userId,
+          roleName: req.auth?.roleName,
           });
           if (!setting) {
             return res.status(404).json(createResponse(null, 'Setting not found', 404));
@@ -142,7 +147,7 @@ function InitSettingsRouter(settingsUsecase) {
           return res.json(createResponse(setting, 'Setting updated successfully', 200));
         } catch (error) {
           req.log?.error({ error: error.message }, 'route_settings_update_by_id_error');
-          return res.status(400).json(createResponse(null, error.message || 'Failed to update setting', 400));
+          return res.status(error.status || 400).json(createResponse(null, error.message || 'Failed to update setting', 400));
         }
       } else {
         // Update by key
@@ -151,7 +156,8 @@ function InitSettingsRouter(settingsUsecase) {
           const setting = await settingsUsecase.updateSettingByKey(keyParam, req.body, { 
             requestId: req.requestId, 
             log: req.log,
-            userId: req.auth?.userId 
+            userId: req.auth?.userId,
+          roleName: req.auth?.roleName,
           });
           if (!setting) {
             return res.status(404).json(createResponse(null, 'Setting not found', 404));
@@ -159,7 +165,7 @@ function InitSettingsRouter(settingsUsecase) {
           return res.json(createResponse(setting, 'Setting updated successfully', 200));
         } catch (error) {
           req.log?.error({ error: error.message }, 'route_settings_update_by_key_error');
-          return res.status(400).json(createResponse(null, error.message || 'Failed to update setting', 400));
+          return res.status(error.status || 400).json(createResponse(null, error.message || 'Failed to update setting', 400));
         }
       }
     }
@@ -179,12 +185,13 @@ function InitSettingsRouter(settingsUsecase) {
         await settingsUsecase.deleteSetting(req.params.id, { 
           requestId: req.requestId, 
           log: req.log,
-          userId: req.auth?.userId 
+          userId: req.auth?.userId,
+          roleName: req.auth?.roleName,
         });
         return res.json(createResponse(null, 'Setting deleted successfully', 200));
       } catch (error) {
         req.log?.error({ error: error.message }, 'route_settings_delete_error');
-        return res.status(400).json(createResponse(null, error.message || 'Failed to delete setting', 400));
+        return res.status(error.status || 400).json(createResponse(null, error.message || 'Failed to delete setting', 400));
       }
     }
   );

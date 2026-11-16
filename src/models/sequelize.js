@@ -4,17 +4,20 @@ const Sequelize = sequelizeModule.Sequelize || sequelizeModule.default || sequel
 const DB_TYPE = (process.env.DB_TYPE || 'postgres').toLowerCase();
 let sequelize;
 
-// Connection pool configuration optimized for serverless environments
-// Serverless functions have cold starts and may need connection reuse
+// Additional configuration for serverless and Supabase
+const isVercel = process.env.VERCEL === '1' || process.env.VERCEL_ENV;
+
+// Connection pool configuration.
+// Server (PM2): pool lebih besar agar lonjakan login/absen serentak tidak
+// mengantre sampai timeout. Serverless (Vercel): tetap kecil karena tiap
+// instance punya pool sendiri. Bisa di-override dengan DB_POOL_MAX.
+const parsedPoolMax = parseInt(process.env.DB_POOL_MAX, 10);
 const poolConfig = {
-  max: 5, // Maximum number of connections in pool
+  max: Number.isFinite(parsedPoolMax) && parsedPoolMax > 0 ? parsedPoolMax : (isVercel ? 5 : 20), // Maximum number of connections in pool
   min: 0, // Minimum number of connections in pool
   acquire: 30000, // Maximum time (ms) to get connection before error
   idle: 10000, // Maximum time (ms) connection can be idle before release
 };
-
-// Additional configuration for serverless and Supabase
-const isVercel = process.env.VERCEL === '1' || process.env.VERCEL_ENV;
 
 if (DB_TYPE === 'mysql') {
   sequelize = new Sequelize(
